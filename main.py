@@ -2,7 +2,8 @@ import os
 import asyncio
 import yt_dlp
 import threading
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, MessageHandler, 
     CallbackQueryHandler, ContextTypes, filters
@@ -10,111 +11,109 @@ from telegram.ext import (
 
 # --- 1. الإعدادات الأساسية ---
 TOKEN = "8579186374:AAHOKfRnSWG0zctzxff5YfMkEhtw8kD38G0"
-ADMIN_ID = 7349033289  # آيدي المطور
+ADMIN_ID = 7349033289  # آيديك الخاص
+DEV_USER = "@TOP_1UP"   
+CHANNELS = ["@T_U_H1", "@T_U_H2", "@Mega0Net"]
 USERS_FILE = "users.txt"
 BAN_FILE = "banned.txt"
 
 # --- 2. إدارة البيانات ---
-def manage_data(file, user_id, action="add"):
-    if not os.path.exists(file): open(file, "w").close()
-    with open(file, "r+") as f:
-        data = f.read().splitlines()
-        if action == "add" and str(user_id) not in data:
-            f.seek(0, 2); f.write(f"{user_id}\n")
-        elif action == "remove" and str(user_id) in data:
-            data.remove(str(user_id))
-            f.seek(0); f.truncate(); f.write("\n".join(data) + "\n")
-        return data
+def manage_list(file_path, item_id, action="add"):
+    if not os.path.exists(file_path): open(file_path, "w").close()
+    with open(file_path, "r+") as f:
+        items = f.read().splitlines()
+        if action == "add" and str(item_id) not in items:
+            f.seek(0, 2); f.write(f"{item_id}\n")
+        elif action == "remove" and str(item_id) in items:
+            items.remove(str(item_id))
+            f.seek(0); f.truncate(); f.write("\n".join(items) + ("\n" if items else ""))
+        return items
 
 # --- 3. التحقق من الحظر والاشتراك ---
-async def is_banned(user_id):
-    banned_list = manage_data(BAN_FILE, user_id, action="get")
-    return str(user_id) in banned_list
-
-# --- 4. لوحة التحكم المطورة ---
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def check_access(update, context):
     user_id = update.effective_user.id
-    if await is_banned(user_id): return # تجاهل المحظورين
-    
-    manage_data(USERS_FILE, user_id, "add")
-    
-    # قائمة الأزرار السفلية
-    main_kb = [['📥 تحميل', '📊 إحصائياتي'], ['👨‍💻 المطور']]
-    if user_id == ADMIN_ID: main_kb.append(['🛠 لوحة التحكم'])
-    
-    await update.message.reply_text(
-        f"✨ أهلاً {update.effective_user.first_name}!\nأرسل رابط الفيديو للبدء.",
-        reply_markup=ReplyKeyboardMarkup(main_kb, resize_keyboard=True)
-    )
+    if str(user_id) in manage_list(BAN_FILE, user_id, "get"): return "banned"
+    for ch in CHANNELS:
+        try:
+            member = await context.bot.get_chat_member(chat_id=ch, user_id=user_id)
+            if member.status in ['left', 'kicked']: return "not_subbed"
+        except: continue
+    return "ok"
 
-async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID: return
+# --- 4. واجهة البوت ---
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    status = await check_access(update, context)
+    if status == "banned": return
     
-    users_count = len(manage_data(USERS_FILE, 0, "get"))
-    banned_count = len(manage_data(BAN_FILE, 0, "get"))
+    manage_list(USERS_FILE, user.id, "add")
     
-    keyboard = [
-        [InlineKeyboardButton(f"👥 مستخدمين: {users_count}", callback_data="none"),
-         InlineKeyboardButton(f"🚫 محظورين: {banned_count}", callback_data="none")],
-        [InlineKeyboardButton("📢 إذاعة (Broadcast)", callback_data="broadcast")],
-        [InlineKeyboardButton("🚫 حظر مستخدم", callback_data="ban_user"),
-         InlineKeyboardButton("✅ فك حظر", callback_data="unban_user")],
-        [InlineKeyboardButton("📄 نسخة احتياطية", callback_data="backup")]
-    ]
-    await update.message.reply_text("🛠 **إعدادات المسؤول**", reply_markup=InlineKeyboardMarkup(keyboard))
+    # القائمة السفلية مع زر الإلغاء
+    kb = [['📥 تحميل', '📊 إحصائياتي'], ['👨‍💻 المطور']]
+    if user.id == ADMIN_ID: kb.append(['🛠 لوحة التحكم'])
+    
+    markup = ReplyKeyboardMarkup(kb, resize_keyboard=True)
+    await update.message.reply_text(f"✨ أهلاً بك {user.first_name} في بوت CYBORG!\nأرسل الرابط أو اختر من القائمة:", reply_markup=markup)
+    
+    if status == "not_subbed":
+        btns = [[InlineKeyboardButton(f"قناة {i+1} 📢", url=f"https://t.me/{c.replace('@','')}")] for i, c in enumerate(CHANNELS)]
+        btns.append([InlineKeyboardButton("✅ تم الاشتراك", callback_data="verify")])
+        await update.message.reply_text("⚠️ اشترك أولاً لتفعيل البوت:", reply_markup=InlineKeyboardMarkup(btns))
 
-# --- 5. معالجة الرسائل ---
+# --- 5. معالجة الرسائل والتحميل ---
 async def handle_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    if await is_banned(user_id): return
+    status = await check_access(update, context)
+    if status == "banned": return
     
     text = update.message.text
 
-    if text == '🛠 لوحة التحكم':
-        await admin_panel(update, context); return
+    # معالجة زر الإلغاء
+    if text == '❌ إلغاء':
+        context.user_data.clear()
+        kb = [['📥 تحميل', '📊 إحصائياتي'], ['👨‍💻 المطور']]
+        if user_id == ADMIN_ID: kb.append(['🛠 لوحة التحكم'])
+        await update.message.reply_text("📥 تم إلغاء العملية والعودة للقائمة.", reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True))
+        return
 
-    # تنفيذ الإذاعة
-    if context.user_data.get('waiting_broadcast'):
-        users = manage_data(USERS_FILE, 0, "get")
-        for u in users:
-            try: await context.bot.send_message(chat_id=u, text=text)
-            except: pass
-        await update.message.reply_text("✅ تم إرسال الإذاعة للجميع."); context.user_data['waiting_broadcast'] = False; return
+    if text == '📥 تحميل':
+        # إظهار زر الإلغاء للمستخدم عند طلب الرابط
+        await update.message.reply_text("🔗 من فضلك أرسل رابط الفيديو الآن:", 
+                                       reply_markup=ReplyKeyboardMarkup([['❌ إلغاء']], resize_keyboard=True))
+        return
 
-    # تنفيذ الحظر
-    if context.user_data.get('waiting_ban'):
-        manage_data(BAN_FILE, text, "add")
-        await update.message.reply_text(f"🚫 تم حظر المستخدم {text}"); context.user_data['waiting_ban'] = False; return
+    if text == '🛠 لوحة التحكم' and user_id == ADMIN_ID:
+        users = len(manage_list(USERS_FILE, 0, "get"))
+        btns = [[InlineKeyboardButton(f"👥 مستخدمين: {users}", callback_data="n")],
+                [InlineKeyboardButton("📢 إذاعة للكل", callback_data="bc"), InlineKeyboardButton("🚫 حظر", callback_data="ban")]]
+        await update.message.reply_text("🛠 إعدادات المسؤول:", reply_markup=InlineKeyboardMarkup(btns))
+        return
 
-    # تنفيذ فك الحظر
-    if context.user_data.get('waiting_unban'):
-        manage_data(BAN_FILE, text, "remove")
-        await update.message.reply_text(f"✅ تم فك الحظر عن {text}"); context.user_data['waiting_unban'] = False; return
-
-    # منطق التحميل
+    # منطق تحميل الفيديو
     if "http" in text:
-        msg = await update.message.reply_text("⏳ جاري المعالجة...")
-        # (هنا يوضع كود yt-dlp للتحميل كما في المثال السابق)
-        await msg.edit_text("✅ رابط مستلم، جاري التحميل...")
+        if status == "not_subbed":
+            await update.message.reply_text("❌ يجب الاشتراك في القنوات أولاً!")
+            return
+        
+        m = await update.message.reply_text("⏳ جاري التحميل...")
+        try:
+            path = f"vid_{user_id}.mp4"
+            with yt_dlp.YoutubeDL({'format': 'best', 'outtmpl': path, 'quiet': True}) as ydl:
+                ydl.download([text])
+            await update.message.reply_video(video=open(path, "rb"), caption=f"✅ تم التحميل بواسطة {DEV_USER}")
+            os.remove(path); await m.delete()
+        except:
+            await m.edit_text("❌ خطأ! الرابط غير مدعوم أو المحتوى خاص.")
 
-# --- 6. تفاعل الأزرار ---
-async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query; await q.answer()
-    if q.data == "broadcast":
-        await q.message.reply_text("📝 أرسل رسالة الإذاعة:")
-        context.user_data['waiting_broadcast'] = True
-    elif q.data == "ban_user":
-        await q.message.reply_text("🆔 أرسل آيدي (ID) المستخدم لحظره:")
-        context.user_data['waiting_ban'] = True
-    elif q.data == "unban_user":
-        await q.message.reply_text("🆔 أرسل آيدي (ID) المستخدم لفك حظره:")
-        context.user_data['waiting_unban'] = True
-    elif q.data == "backup":
-        await context.bot.send_document(chat_id=ADMIN_ID, document=open(USERS_FILE, "rb"))
+# --- 6. التشغيل ---
+def run_srv():
+    HTTPServer(('0.0.0.0', int(os.environ.get("PORT", 8080))), type('S', (BaseHTTPRequestHandler,), {'do_GET': lambda s: (s.send_response(200), s.end_headers(), s.wfile.write(b"OK"))})).serve_forever()
 
-# --- التشغيل ---
-app = ApplicationBuilder().token(TOKEN).build()
-app.add_handler(CommandHandler("start", start))
-app.add_handler(CallbackQueryHandler(callbacks))
-app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_msg))
-app.run_polling()
+if __name__ == "__main__":
+    threading.Thread(target=run_srv, daemon=True).start()
+    app = ApplicationBuilder().token(TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CallbackQueryHandler(lambda u, c: u.callback_query.answer())) # معالج بسيط للكولباك
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_msg))
+    print("🚀 البوت يعمل مع زر الإلغاء...")
+    app.run_polling(drop_pending_updates=True)
