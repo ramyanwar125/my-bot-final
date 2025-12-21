@@ -25,9 +25,6 @@ def manage_list(file_path, item_id, action="add"):
         if action == "add" and str(item_id) not in items:
             f.seek(0, 2); f.write(f"{item_id}\n")
         elif action == "get": return items
-        elif action == "remove" and str(item_id) in items:
-            items.remove(str(item_id))
-            f.seek(0); f.truncate(); f.write("\n".join(items) + ("\n" if items else ""))
         return items
 
 # --- 3. التحقق من الوصول ---
@@ -41,9 +38,9 @@ async def check_access(update, context):
         except: continue
     return "ok"
 
-# --- 4. واجهة القوائم ---
+# --- 4. واجهة القوائم (تم حذف كلمة تحميل) ---
 def get_main_kb(user_id):
-    kb = [['📥 تحميل', '📊 إحصائياتي'], ['👨‍💻 المطور']]
+    kb = [['📊 إحصائياتي', '👨‍💻 المطور']]
     if user_id == ADMIN_ID: kb.append(['🛠 لوحة التحكم'])
     return ReplyKeyboardMarkup(kb, resize_keyboard=True)
 
@@ -54,7 +51,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if status == "banned": return
     
     manage_list(USERS_FILE, user.id, "add")
-    welcome = f"✨ أهلاً بك {user.first_name} في بوت CYBORG!\nأرسل رابط الفيديو للتحميل أو اختر من القائمة."
+    welcome = f"✨ أهلاً بك {user.first_name} في بوت CYBORG!\nفقط أرسل رابط الفيديو وسأقوم بحفظه لك فوراً."
     await update.message.reply_text(welcome, reply_markup=get_main_kb(user.id))
     
     if status == "not_subbed":
@@ -69,20 +66,23 @@ async def handle_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     text = update.message.text
 
-    # معالجة الأزرار
+    # معالجة الأزرار (تواصل مع المطور)
     if text == '👨‍💻 المطور':
-        await update.message.reply_text(f"👤 المطور: {DEV_USER}\n🆔 الآيدي: `{ADMIN_ID}`")
-    elif text == '📥 تحميل':
-        await update.message.reply_text("🔗 أرسل الرابط الآن أو اضغط إلغاء:", reply_markup=ReplyKeyboardMarkup([['❌ إلغاء']], resize_keyboard=True))
-    elif text == '❌ إلغاء':
-        await update.message.reply_text("🏠 العودة للقائمة الرئيسية:", reply_markup=get_main_kb(user_id))
+        dev_msg = (
+            f"👤 **مطور البوت:** {DEV_USER}\n"
+            f"🆔 **الآيدي:** `{ADMIN_ID}`\n\n"
+            "شكراً لتواصلك معنا! نحن نقدر استخدامك للبوت ونسعى دائماً لتطويره لخدمتك بأفضل شكل ممكن. ❤️"
+        )
+        await update.message.reply_text(dev_msg, parse_mode="Markdown")
+        
     elif text == '📊 إحصائياتي':
-        await update.message.reply_text(f"📊 أهلاً {update.effective_user.first_name}\nأنت مستخدم فعال في البوت!")
+        await update.message.reply_text(f"📊 أهلاً {update.effective_user.first_name}\nأنت عضو مميز في عائلة CYBORG.")
+        
     elif text == '🛠 لوحة التحكم' and user_id == ADMIN_ID:
         users = len(manage_list(USERS_FILE, 0, "get"))
         btns = [[InlineKeyboardButton(f"👥 مستخدمين: {users}", callback_data="none")],
                 [InlineKeyboardButton("📢 إذاعة", callback_data="bc"), InlineKeyboardButton("🚫 حظر", callback_data="ban")]]
-        await update.message.reply_text("🛠 لوحة الأدمن:", reply_markup=InlineKeyboardMarkup(btns))
+        await update.message.reply_text("🛠 لوحة الإدارة:", reply_markup=InlineKeyboardMarkup(btns))
     
     # تنفيذ الإذاعة والحظر
     elif context.user_data.get('state') == 'bc' and user_id == ADMIN_ID:
@@ -94,127 +94,51 @@ async def handle_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
         manage_list(BAN_FILE, text, "add")
         await update.message.reply_text(f"🚫 تم حظر {text}"); context.user_data['state'] = None
 
-    # التحميل الفعلي
+    # التحميل (تم حذف المعرف من الكابشن)
     elif "http" in text:
         if status == "not_subbed":
             await update.message.reply_text("❌ اشترك في القنوات أولاً!")
             return
-        m = await update.message.reply_text("⏳ جاري التحميل من الرابط...")
+        m = await update.message.reply_text("⏳ جاري المعالجة...")
         try:
             path = f"vid_{user_id}.mp4"
             with yt_dlp.YoutubeDL({'format': 'best', 'outtmpl': path, 'quiet': True}) as ydl:
                 ydl.download([text])
-            await update.message.reply_video(video=open(path, "rb"), caption=f"✅ تم بواسطة {DEV_USER}", reply_markup=get_main_kb(user_id))
+            # تم إزالة caption المعرف هنا
+            await update.message.reply_video(video=open(path, "rb"))
             os.remove(path); await m.delete()
-        except Exception as e:
-            await m.edit_text(f"❌ خطأ: الرابط غير مدعوم أو حدثت مشكلة.")
+        except:
+            await m.edit_text("❌ عذراً، لم أتمكن من تحميل هذا الرابط.")
 
-# --- 6. تفاعل الأزرار الشفافة ---
+# --- 6. تفاعل الأزرار ---
 async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
     if q.data == "verify":
         if await check_access(update, context) == "ok":
-            await q.edit_message_text("✅ تم التفعيل! يمكنك الاستخدام الآن.")
+            await q.edit_message_text("✅ تم التفعيل! أرسل أي رابط الآن.")
         else:
-            await q.answer("❌ لم تشترك بعد!", show_alert=True)
+            await q.answer("❌ لم تشترك في كل القنوات!", show_alert=True)
     elif q.data == "bc":
-        await q.message.reply_text("📝 أرسل رسالة الإذاعة:"); context.user_data['state'] = 'bc'
+        await q.message.reply_text("📝 أرسل الرسالة:"); context.user_data['state'] = 'bc'
     elif q.data == "ban":
-        await q.message.reply_text("🆔 أرسل آيدي المحظور:"); context.user_data['state'] = 'ban'
+        await q.message.reply_text("🆔 أرسل الآيدي:"); context.user_data['state'] = 'ban'
 
 # --- 7. تشغيل السيرفر ---
 def run_srv():
     HTTPServer(('0.0.0.0', int(os.environ.get("PORT", 8080))), type('S', (BaseHTTPRequestHandler,), {'do_GET': lambda s: (s.send_response(200), s.end_headers(), s.wfile.write(b"OK"))})).serve_forever()
 
 if __name__ == "__main__":
+    # رسالة ترحيبية عند بداية تشغيل السكريبت
+    print("---------------------------------------")
+    print("🚀 CYBORG BOT IS STARTING...")
+    print("✅ DEVELOPER: @TOP_1UP")
+    print("✅ STATUS: ACTIVE & SECURE")
+    print("---------------------------------------")
+    
     threading.Thread(target=run_srv, daemon=True).start()
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(callbacks))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_msg))
-    print("🚀 البوت يعمل بكفاءة الآن!")
-    app.run_polling(drop_pending_updates=True)
-        try:
-            member = await context.bot.get_chat_member(chat_id=ch, user_id=user_id)
-            if member.status in ['left', 'kicked']: return "not_subbed"
-        except: continue
-    return "ok"
-
-# --- 4. واجهة البوت ---
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    status = await check_access(update, context)
-    if status == "banned": return
-    
-    manage_list(USERS_FILE, user.id, "add")
-    
-    # القائمة السفلية مع زر الإلغاء
-    kb = [['📥 تحميل', '📊 إحصائياتي'], ['👨‍💻 المطور']]
-    if user.id == ADMIN_ID: kb.append(['🛠 لوحة التحكم'])
-    
-    markup = ReplyKeyboardMarkup(kb, resize_keyboard=True)
-    await update.message.reply_text(f"✨ أهلاً بك {user.first_name} في بوت CYBORG!\nأرسل الرابط أو اختر من القائمة:", reply_markup=markup)
-    
-    if status == "not_subbed":
-        btns = [[InlineKeyboardButton(f"قناة {i+1} 📢", url=f"https://t.me/{c.replace('@','')}")] for i, c in enumerate(CHANNELS)]
-        btns.append([InlineKeyboardButton("✅ تم الاشتراك", callback_data="verify")])
-        await update.message.reply_text("⚠️ اشترك أولاً لتفعيل البوت:", reply_markup=InlineKeyboardMarkup(btns))
-
-# --- 5. معالجة الرسائل والتحميل ---
-async def handle_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    status = await check_access(update, context)
-    if status == "banned": return
-    
-    text = update.message.text
-
-    # معالجة زر الإلغاء
-    if text == '❌ إلغاء':
-        context.user_data.clear()
-        kb = [['📥 تحميل', '📊 إحصائياتي'], ['👨‍💻 المطور']]
-        if user_id == ADMIN_ID: kb.append(['🛠 لوحة التحكم'])
-        await update.message.reply_text("📥 تم إلغاء العملية والعودة للقائمة.", reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True))
-        return
-
-    if text == '📥 تحميل':
-        # إظهار زر الإلغاء للمستخدم عند طلب الرابط
-        await update.message.reply_text("🔗 من فضلك أرسل رابط الفيديو الآن:", 
-                                       reply_markup=ReplyKeyboardMarkup([['❌ إلغاء']], resize_keyboard=True))
-        return
-
-    if text == '🛠 لوحة التحكم' and user_id == ADMIN_ID:
-        users = len(manage_list(USERS_FILE, 0, "get"))
-        btns = [[InlineKeyboardButton(f"👥 مستخدمين: {users}", callback_data="n")],
-                [InlineKeyboardButton("📢 إذاعة للكل", callback_data="bc"), InlineKeyboardButton("🚫 حظر", callback_data="ban")]]
-        await update.message.reply_text("🛠 إعدادات المسؤول:", reply_markup=InlineKeyboardMarkup(btns))
-        return
-
-    # منطق تحميل الفيديو
-    if "http" in text:
-        if status == "not_subbed":
-            await update.message.reply_text("❌ يجب الاشتراك في القنوات أولاً!")
-            return
-        
-        m = await update.message.reply_text("⏳ جاري التحميل...")
-        try:
-            path = f"vid_{user_id}.mp4"
-            with yt_dlp.YoutubeDL({'format': 'best', 'outtmpl': path, 'quiet': True}) as ydl:
-                ydl.download([text])
-            await update.message.reply_video(video=open(path, "rb"), caption=f"✅ تم التحميل بواسطة {DEV_USER}")
-            os.remove(path); await m.delete()
-        except:
-            await m.edit_text("❌ خطأ! الرابط غير مدعوم أو المحتوى خاص.")
-
-# --- 6. التشغيل ---
-def run_srv():
-    HTTPServer(('0.0.0.0', int(os.environ.get("PORT", 8080))), type('S', (BaseHTTPRequestHandler,), {'do_GET': lambda s: (s.send_response(200), s.end_headers(), s.wfile.write(b"OK"))})).serve_forever()
-
-if __name__ == "__main__":
-    threading.Thread(target=run_srv, daemon=True).start()
-    app = ApplicationBuilder().token(TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(lambda u, c: u.callback_query.answer())) # معالج بسيط للكولباك
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_msg))
-    print("🚀 البوت يعمل مع زر الإلغاء...")
     app.run_polling(drop_pending_updates=True)
