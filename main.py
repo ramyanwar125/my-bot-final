@@ -10,7 +10,7 @@ from telegram.ext import (
 )
 
 # --- 1. الإعدادات ---
-TOKEN = "8579186374:AAESOT5rK57Ud48CIPThLAx6F6gf-n5rRh0"
+TOKEN = "8579186374:AAFsgJms9BdnL7Jih7DL3jNiyofWh-vpGTg"
 ADMIN_ID = 7349033289 
 DEV_USER = "@TOP_1UP"
 COOKIES_FILE = "cookies.txt"
@@ -70,8 +70,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     [InlineKeyboardButton("Audio (MP3)", callback_data=f"dl|mp3|{text}")]
                 ]
                 await m.edit_text(f"🎬 {info.get('title')[:50]}...\n\nاختر الجودة:", reply_markup=InlineKeyboardMarkup(btns))
-        except Exception as e:
-            await m.edit_text(f"❌ خطأ في التحليل. تأكد من ملف cookies.txt")
+        except Exception:
+            await m.edit_text("❌ خطأ في التحليل. تأكد من ملف cookies.txt")
 
 async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
@@ -96,10 +96,10 @@ async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 else: await q.message.reply_video(f)
             os.remove(path)
             await msg.delete()
-        except:
+        except Exception:
             await msg.edit_text("❌ حدث خطأ أثناء التحميل.")
 
-# --- 4. سيرفر الويب ---
+# --- 4. سيرفر الويب وسيرفر الصحة ---
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -119,4 +119,6 @@ if __name__ == "__main__":
     app.add_handler(CallbackQueryHandler(callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
+    # حل مشكلة الـ Conflict: drop_pending_updates=True
+    # يقوم بمسح الطلبات المتراكمة ويقطع الاتصال القديم
     app.run_polling(drop_pending_updates=True)
