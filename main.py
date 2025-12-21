@@ -24,7 +24,6 @@ def manage_list(file_path, item_id, action="add"):
         items = f.read().splitlines()
         if action == "add" and str(item_id) not in items:
             f.seek(0, 2); f.write(f"{item_id}\n")
-        elif action == "get": return items
         return items
 
 # --- 3. التحقق من الوصول ---
@@ -38,9 +37,9 @@ async def check_access(update, context):
         except: continue
     return "ok"
 
-# --- 4. واجهة القوائم (تم حذف كلمة تحميل) ---
+# --- 4. واجهة القوائم (تم حذف تحميل) ---
 def get_main_kb(user_id):
-    kb = [['📊 إحصائياتي', '👨‍💻 المطور']]
+    kb = [['📊 إحصائياتي'], ['👨‍💻 المطور']]
     if user_id == ADMIN_ID: kb.append(['🛠 لوحة التحكم'])
     return ReplyKeyboardMarkup(kb, resize_keyboard=True)
 
@@ -51,7 +50,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if status == "banned": return
     
     manage_list(USERS_FILE, user.id, "add")
-    welcome = f"✨ أهلاً بك {user.first_name} في بوت CYBORG!\nفقط أرسل رابط الفيديو وسأقوم بحفظه لك فوراً."
+    welcome = f"✨ أهلاً بك {user.first_name} في بوت CYBORG!\nأرسل رابط الفيديو مباشرة وسأقوم بحفظه لك."
     await update.message.reply_text(welcome, reply_markup=get_main_kb(user.id))
     
     if status == "not_subbed":
@@ -66,35 +65,28 @@ async def handle_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     text = update.message.text
 
-    # معالجة الأزرار (تواصل مع المطور)
-    if text == '👨‍💻 المطور':
-        dev_msg = (
-            f"👤 **مطور البوت:** {DEV_USER}\n"
+    # --- إصلاح تواصل مع المطور ---
+    if "المطور" in text:
+        thanks_msg = (
+            f"👤 **المطور:** {DEV_USER}\n"
             f"🆔 **الآيدي:** `{ADMIN_ID}`\n\n"
-            "شكراً لتواصلك معنا! نحن نقدر استخدامك للبوت ونسعى دائماً لتطويره لخدمتك بأفضل شكل ممكن. ❤️"
+            "شكراً جزيلاً لك على تواصلك واستخدامك لبوت CYBORG. نحن ممتنون جداً لدعمك ونقدر ثقتك بنا! ❤️"
         )
-        await update.message.reply_text(dev_msg, parse_mode="Markdown")
-        
-    elif text == '📊 إحصائياتي':
-        await update.message.reply_text(f"📊 أهلاً {update.effective_user.first_name}\nأنت عضو مميز في عائلة CYBORG.")
-        
+        await update.message.reply_text(thanks_msg, parse_mode="Markdown")
+        return
+
+    elif "إحصائياتي" in text:
+        await update.message.reply_text(f"📊 أهلاً {update.effective_user.first_name}، أنت مستخدم مسجل لدينا بنجاح.")
+        return
+
     elif text == '🛠 لوحة التحكم' and user_id == ADMIN_ID:
         users = len(manage_list(USERS_FILE, 0, "get"))
         btns = [[InlineKeyboardButton(f"👥 مستخدمين: {users}", callback_data="none")],
                 [InlineKeyboardButton("📢 إذاعة", callback_data="bc"), InlineKeyboardButton("🚫 حظر", callback_data="ban")]]
         await update.message.reply_text("🛠 لوحة الإدارة:", reply_markup=InlineKeyboardMarkup(btns))
-    
-    # تنفيذ الإذاعة والحظر
-    elif context.user_data.get('state') == 'bc' and user_id == ADMIN_ID:
-        for u in manage_list(USERS_FILE, 0, "get"):
-            try: await context.bot.send_message(chat_id=u, text=text)
-            except: pass
-        await update.message.reply_text("✅ تم الإرسال."); context.user_data['state'] = None
-    elif context.user_data.get('state') == 'ban' and user_id == ADMIN_ID:
-        manage_list(BAN_FILE, text, "add")
-        await update.message.reply_text(f"🚫 تم حظر {text}"); context.user_data['state'] = None
+        return
 
-    # التحميل (تم حذف المعرف من الكابشن)
+    # --- التحميل المباشر (تم حذف الكابشن) ---
     elif "http" in text:
         if status == "not_subbed":
             await update.message.reply_text("❌ اشترك في القنوات أولاً!")
@@ -104,11 +96,11 @@ async def handle_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
             path = f"vid_{user_id}.mp4"
             with yt_dlp.YoutubeDL({'format': 'best', 'outtmpl': path, 'quiet': True}) as ydl:
                 ydl.download([text])
-            # تم إزالة caption المعرف هنا
+            # إرسال بدون أي نص (No Caption) كما طلبت
             await update.message.reply_video(video=open(path, "rb"))
             os.remove(path); await m.delete()
         except:
-            await m.edit_text("❌ عذراً، لم أتمكن من تحميل هذا الرابط.")
+            await m.edit_text("❌ عذراً، لم أتمكن من التحميل.")
 
 # --- 6. تفاعل الأزرار ---
 async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -116,9 +108,9 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await q.answer()
     if q.data == "verify":
         if await check_access(update, context) == "ok":
-            await q.edit_message_text("✅ تم التفعيل! أرسل أي رابط الآن.")
+            await q.edit_message_text("✅ تم التفعيل! أرسل الرابط الآن.")
         else:
-            await q.answer("❌ لم تشترك في كل القنوات!", show_alert=True)
+            await q.answer("❌ لم تشترك بعد!", show_alert=True)
     elif q.data == "bc":
         await q.message.reply_text("📝 أرسل الرسالة:"); context.user_data['state'] = 'bc'
     elif q.data == "ban":
@@ -129,12 +121,11 @@ def run_srv():
     HTTPServer(('0.0.0.0', int(os.environ.get("PORT", 8080))), type('S', (BaseHTTPRequestHandler,), {'do_GET': lambda s: (s.send_response(200), s.end_headers(), s.wfile.write(b"OK"))})).serve_forever()
 
 if __name__ == "__main__":
-    # رسالة ترحيبية عند بداية تشغيل السكريبت
-    print("---------------------------------------")
-    print("🚀 CYBORG BOT IS STARTING...")
-    print("✅ DEVELOPER: @TOP_1UP")
-    print("✅ STATUS: ACTIVE & SECURE")
-    print("---------------------------------------")
+    # رسالة ترحيبية عند بداية التشغيل
+    print("\n" + "="*40)
+    print("🚀 CYBORG BOT STARTED SUCCESSFULLY!")
+    print("👨‍💻 DEV: @TOP_1UP | ID: 7349033289")
+    print("="*40 + "\n")
     
     threading.Thread(target=run_srv, daemon=True).start()
     app = ApplicationBuilder().token(TOKEN).build()
