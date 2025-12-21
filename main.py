@@ -9,7 +9,7 @@ from telegram.ext import (
 )
 
 # --- 1. الإعدادات ---
-TOKEN = "8579186374:AAGFuEUD0IiJM2EiTk6wPdmMGSud88Pc88w-vpGTg" # تأكد من وضع التوكن الخاص بك
+TOKEN = "8579186374:AAEUzOGQ8y6jIjYWRkOKM_x7QhB1xaiyZSA" # تأكد من وضع التوكن الخاص بك
 ADMIN_ID = 7349033289 
 DEV_USER = "@TOP_1UP"   
 CHANNELS = ["@T_U_H1", "@T_U_H2", "@Mega0Net"]
