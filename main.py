@@ -24,6 +24,7 @@ def manage_list(file_path, item_id, action="add"):
         items = f.read().splitlines()
         if action == "add" and str(item_id) not in items:
             f.seek(0, 2); f.write(f"{item_id}\n")
+            return items
         return items
 
 # --- 3. التحقق من الوصول ---
@@ -45,11 +46,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     manage_list(USERS_FILE, user_id, "add")
     
-    # القائمة السفلية (بدون كلمة تحميل)
     kb = [['📊 إحصائياتي', '👨‍💻 المطور']]
     if user_id == ADMIN_ID: kb.append(['🛠 لوحة التحكم'])
     
-    welcome = "✨ أهلاً بك في بوت CYBORG!\nفقط أرسل رابط الفيديو وسأقوم بحفظه لك فوراً."
+    welcome = f"✨ أهلاً بك في بوت CYBORG!\nفقط أرسل رابط الفيديو وسأقوم بحفظه لك فوراً."
     await update.message.reply_text(welcome, reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True))
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -59,20 +59,29 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     text = update.message.text
 
-    # --- إصلاح تواصل مع المطور (شرط دقيق لمنع التكرار) ---
+    # --- 1. إصلاح تواصل مع المطور ---
     if "المطور" in text:
         dev_msg = (
             f"👤 **المطور:** {DEV_USER}\n"
             f"🆔 **الآيدي:** `{ADMIN_ID}`\n\n"
-            "شكراً جزيلاً لك على تواصلك واستخدامك لبوت CYBORG. نحن ممتنون جداً لدعمك ونقدر ثقتك بنا! ❤️"
+            "شكراً جزيلاً لك على تواصلك واستخدامك لبوتنا! نحن ممتنون جداً لدعمك. ❤️"
         )
         await update.message.reply_text(dev_msg, parse_mode="Markdown")
         return 
 
+    # --- 2. إصلاح الإحصائيات (إظهار عدد المستخدمين الكلي) ---
     if "إحصائياتي" in text:
-        await update.message.reply_text("📊 أهلاً بك! أنت عضو نشط في عائلة CYBORG.")
+        all_users = len(manage_list(USERS_FILE, 0, "get"))
+        msg = (
+            f"📊 **إحصائيات البوت:**\n\n"
+            f"👥 عدد مستخدمي البوت: {all_users}\n"
+            f"✅ حالتك: مستخدم نشط\n\n"
+            f"شكراً لكونك جزءاً من عائلة CYBORG! 🤖"
+        )
+        await update.message.reply_text(msg, parse_mode="Markdown")
         return
 
+    # --- 3. لوحة التحكم (للأدمن) ---
     if text == '🛠 لوحة التحكم' and user_id == ADMIN_ID:
         users = len(manage_list(USERS_FILE, 0, "get"))
         btns = [[InlineKeyboardButton(f"👥 مستخدمين: {users}", callback_data="n")],
@@ -80,24 +89,28 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("🛠 لوحة الإدارة:", reply_markup=InlineKeyboardMarkup(btns))
         return
 
-    # --- التحميل المباشر ---
+    # --- 4. التحميل + رسالة الانهاء ---
     if "http" in text:
         if status == "not_subbed":
             await update.message.reply_text("❌ اشترك في القنوات أولاً!")
             return
         
-        m = await update.message.reply_text("⏳ جاري التحميل...")
+        m = await update.message.reply_text("⏳ جاري التحميل... يرجى الانتظار")
         try:
             path = f"vid_{user_id}.mp4"
             with yt_dlp.YoutubeDL({'format': 'best', 'outtmpl': path, 'quiet': True}) as ydl:
                 ydl.download([text])
             
-            # إرسال الفيديو بدون أي نصوص (No Caption)
+            # إرسال الفيديو
             await update.message.reply_video(video=open(path, "rb"))
+            
+            # رسالة الانهاء (تظهر بعد الفيديو)
+            await update.message.reply_text("✅ تم تحميل الفيديو بنجاح!\nشكراً لاستخدامك بوت CYBORG. ❤️")
+            
             os.remove(path)
             await m.delete()
         except:
-            await m.edit_text("❌ عذراً، لم أتمكن من تحميل هذا الرابط.")
+            await m.edit_text("❌ عذراً، حدث خطأ أثناء التحميل. تأكد من جودة الرابط.")
         return
 
 # --- 5. التشغيل والسيرفر ---
@@ -105,12 +118,7 @@ def run_srv():
     HTTPServer(('0.0.0.0', int(os.environ.get("PORT", 8080))), type('S', (BaseHTTPRequestHandler,), {'do_GET': lambda s: (s.send_response(200), s.end_headers(), s.wfile.write(b"OK"))})).serve_forever()
 
 if __name__ == "__main__":
-    # رسالة الترحيب في بداية التشغيل لتجنب خطأ NameError
-    print("\n" + "="*30)
-    print("🚀 CYBORG BOT STARTED SUCCESSFULLY!")
-    print(f"👨‍💻 DEV: {DEV_USER}")
-    print("="*30 + "\n")
-    
+    print("\n🚀 CYBORG BOT STARTED SUCCESSFULLY!\n")
     threading.Thread(target=run_srv, daemon=True).start()
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
