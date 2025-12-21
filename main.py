@@ -10,7 +10,7 @@ from telegram.ext import (
 )
 
 # --- 1. الإعدادات ---
-TOKEN = "8579186374:AAHOKfRnSWG0zctzxff5YfMkEhtw8kD38G0"
+TOKEN = "8579186374:AAESOT5rK57Ud48CIPThLAx6F6gf-n5rRh0"
 ADMIN_ID = 7349033289 
 DEV_USER = "@TOP_1UP"
 COOKIES_FILE = "cookies.txt"
