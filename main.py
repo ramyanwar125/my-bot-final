@@ -92,7 +92,6 @@ async def download(update: Update, context: ContextTypes.DEFAULT_TYPE):
     finally:
         if os.path.exists(file_path): os.remove(file_path)
 
-ⓇⒶ ⓂⓎ, [12/21/2025 9:08 AM]
 # --- 4. تشغيل البوت ---
 async def run_bot():
     save_cookies()
