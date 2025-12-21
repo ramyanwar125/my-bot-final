@@ -9,121 +9,135 @@ from telegram.ext import (
 )
 
 # --- 1. الإعدادات ---
-TOKEN = "8579186374:AAHOKfRnSWG0zctzxff5YfMkEhtw8kD38G0" # تأكد من وضع التوكن الخاص بك
+TOKEN = "8579186374:AAHOKfRnSWG0zctzxff5YfMkEhtw8kD38G0" 
 ADMIN_ID = 7349033289 
-DEV_USER = "@TOP_1UP"   
-CHANNELS = ["@T_U_H1", "@T_U_H2", "@Mega0Net"]
 USERS_FILE = "users.txt"
+BAN_FILE = "banned.txt"
+DEV_USER = "@TOP_1UP"
 
-# --- 2. دالة تحويل الحجم إلى صيغة مقروءة ---
-def format_size(bytes):
-    if bytes is None: return "Unknown"
-    for unit in ['B', 'KB', 'MB', 'GB']:
-        if bytes < 1024: return f"{bytes:.1f} {unit}"
-        bytes /= 1024
-    return f"{bytes:.1f} GB"
+# --- 2. إدارة البيانات ---
+def get_list(file_path):
+    if not os.path.exists(file_path): return []
+    with open(file_path, "r") as f:
+        return list(set(f.read().splitlines()))
 
-# --- 3. إدارة البيانات ---
-def get_users_count():
-    if not os.path.exists(USERS_FILE): return 0
-    with open(USERS_FILE, "r") as f:
-        return len(set(f.read().splitlines()))
+def add_to_file(file_path, item_id):
+    items = get_list(file_path)
+    if str(item_id) not in items:
+        with open(file_path, "a") as f:
+            f.write(f"{item_id}\n")
 
-def add_user(user_id):
-    if not os.path.exists(USERS_FILE): open(USERS_FILE, "w").close()
-    with open(USERS_FILE, "a+") as f:
-        f.seek(0)
-        if str(user_id) not in f.read().splitlines():
-            f.write(f"{user_id}\n")
-
-# --- 4. معالجة الأوامر الرئيسية ---
+# --- 3. معالجة الأوامر ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    add_user(update.effective_user.id)
+    user_id = update.effective_user.id
+    if str(user_id) in get_list(BAN_FILE): return
+    
+    add_to_file(USERS_FILE, user_id)
     kb = [['📊 إحصائياتي', '👨‍💻 المطور']]
-    if update.effective_user.id == ADMIN_ID: kb.append(['🛠 لوحة التحكم'])
+    if user_id == ADMIN_ID: kb.append(['🛠 لوحة التحكم'])
+    
     await update.message.reply_text(
-        "✨ أهلاً بك في CYBORG HD!\nأرسل رابط الفيديو وسأعرض لك الجودات المتاحة مع حجم كل منها.",
+        "✨ أهلاً بك في CYBORG!\nأرسل رابط الفيديو الآن للبدء.",
         reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True)
     )
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
+    if str(user_id) in get_list(BAN_FILE): return
+    
     text = update.message.text
+    state = context.user_data.get('state')
 
+    # إحصائيات ومطور
     if "المطور" in text:
-        await update.message.reply_text(f"👤 المطور: {DEV_USER}\n🆔 الآيدي: `{ADMIN_ID}`\n\nشكراً لتواصلك معنا! ❤️")
+        await update.message.reply_text(f"👤 المطور: {DEV_USER}\n🆔 الآيدي: `{ADMIN_ID}`\n\nشكراً لتواصلك! ❤️")
         return
-
     if "إحصائياتي" in text:
-        await update.message.reply_text(f"📊 إجمالي مستخدمي البوت: {get_users_count()}\n✅ أنت عضو نشط في النظام.")
+        await update.message.reply_text(f"📊 عدد المشتركين: {len(get_list(USERS_FILE))}\n✅ حالتك: مستخدم نشط.")
         return
 
+    # لوحة التحكم والعمليات الإدارية
+    if text == '🛠 لوحة التحكم' and user_id == ADMIN_ID:
+        btns = [
+            [InlineKeyboardButton("📢 إذاعة للكل", callback_data="start_bc")],
+            [InlineKeyboardButton("🚫 حظر مستخدم", callback_data="start_ban")]
+        ]
+        await update.message.reply_text("🛠 لوحة الإدارة:", reply_markup=InlineKeyboardMarkup(btns))
+        return
+
+    if state == 'waiting_broadcast':
+        users = get_list(USERS_FILE)
+        for u in users:
+            try: await context.bot.send_message(chat_id=u, text=f"📢 **إشعار:**\n\n{text}", parse_mode="Markdown")
+            except: continue
+        await update.message.reply_text("✅ تم الإرسال."); context.user_data['state'] = None; return
+
+    if state == 'waiting_ban':
+        add_to_file(BAN_FILE, text)
+        await update.message.reply_text(f"✅ تم حظر الآيدي: {text}"); context.user_data['state'] = None; return
+
+    # استخراج الرابط
     if "http" in text:
-        m = await update.message.reply_text("🔎 جاري فحص الرابط وحساب الأحجام...")
+        m = await update.message.reply_text("🔎 جاري تحليل الرابط...")
+        ydl_opts = {'quiet': True, 'user_agent': 'Mozilla/5.0'}
         try:
-            with yt_dlp.YoutubeDL({'quiet': True}) as ydl:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(text, download=False)
-                formats = info.get('formats', [])
-                
-                # البحث عن أحجام تقريبية للجودات المختلفة
-                res = {"1080": "N/A", "720": "N/A", "480": "N/A", "360": "N/f"}
-                for f in formats:
-                    h = str(f.get('height'))
-                    if h in res and f.get('filesize'):
-                        res[h] = format_size(f['filesize'])
-
                 keyboard = [
-                    [InlineKeyboardButton(f"High (720p) - {res['720']}", callback_data=f"dl|720|{text}")],
-                    [InlineKeyboardButton(f"Medium (480p) - {res['480']}", callback_data=f"dl|480|{text}")],
-                    [InlineKeyboardButton(f"Low (360p) - {res['360']}", callback_data=f"dl|360|{text}")],
-                    [InlineKeyboardButton("MP3 (صوت فقط)", callback_data=f"dl|mp3|{text}")]
+                    [InlineKeyboardButton("720p (عالية)", callback_data=f"dl|720|{text}")],
+                    [InlineKeyboardButton("480p (متوسطة)", callback_data=f"dl|480|{text}")],
+                    [InlineKeyboardButton("MP3 (صوت)", callback_data=f"dl|mp3|{text}")]
                 ]
-                await m.edit_text(f"🎬 عنوان الفيديو: {info.get('title')[:50]}...\n\nاختر الجودة المناسبة لك:", 
-                                  reply_markup=InlineKeyboardMarkup(keyboard))
+                await m.edit_text(f"🎬 {info.get('title')[:40]}...\n\nاختر الجودة:", reply_markup=InlineKeyboardMarkup(keyboard))
         except:
-            await m.edit_text("❌ حدث خطأ في استخراج البيانات. الرابط قد يكون غير مدعوم.")
+            btn_new = [[InlineKeyboardButton("🔄 عملية جديدة", callback_data="new_proc")]]
+            await m.edit_text("❌ خطأ في التحليل.", reply_markup=InlineKeyboardMarkup(btn_new))
 
-# --- 5. تنفيذ التحميل المختار ---
-async def query_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# --- 4. معالج الأزرار ---
+async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
+    
+    if q.data == "new_proc":
+        await q.message.reply_text("✨ أرسل رابطاً جديداً الآن:")
+        await q.message.delete(); return
+
+    if q.data == "start_bc":
+        await q.message.reply_text("📝 أرسل رسالة الإذاعة:"); context.user_data['state'] = 'waiting_broadcast'; return
+
+    if q.data == "start_ban":
+        await q.message.reply_text("🆔 أرسل آيدي المستخدم لحظره:"); context.user_data['state'] = 'waiting_ban'; return
+
     data = q.data.split("|")
-    quality, url = data[1], data[2]
-    
-    await q.edit_message_text(f"⏳ جاري تحميل الجودة ({quality})... يرجى الانتظار")
-    
-    path = f"vid_{q.from_user.id}_{quality}.mp4"
-    ydl_opts = {'outtmpl': path, 'quiet': True}
-    
-    if quality == "mp3":
-        ydl_opts.update({'format': 'bestaudio/best', 'outtmpl': path.replace(".mp4", ".mp3")})
-        path = path.replace(".mp4", ".mp3")
-    else:
-        ydl_opts['format'] = f'bestvideo[height<={quality}]+bestaudio/best/best'
-
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
+    if data[0] == "dl":
+        quality, url = data[1], data[2]
+        msg = await q.message.reply_text(f"⏳ جاري التحميل...")
+        path = f"file_{q.from_user.id}.mp4"
         
-        if quality == "mp3": await q.message.reply_audio(audio=open(path, "rb"))
-        else: await q.message.reply_video(video=open(path, "rb"))
-        
-        await q.message.reply_text("✅ تم التحميل بنجاح!\nشكراً لاستخدامك CYBORG.")
-        os.remove(path)
-        await q.message.delete()
-    except:
-        await q.message.reply_text("❌ فشل التحميل. قد يكون الحجم كبيراً جداً على تلجرام.")
+        ydl_opts = {'outtmpl': path, 'quiet': True, 'format': f'bestvideo[height<={quality}]+bestaudio/best' if quality != 'mp3' else 'bestaudio/best'}
+        if quality == 'mp3': path = path.replace('.mp4', '.mp3'); ydl_opts['outtmpl'] = path
 
-# --- 6. التشغيل ---
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl: ydl.download([url])
+            with open(path, "rb") as f:
+                if quality == 'mp3': await q.message.reply_audio(audio=f)
+                else: await q.message.reply_video(video=f)
+            
+            btn_new = [[InlineKeyboardButton("🔄 عملية جديدة", callback_data="new_proc")]]
+            await q.message.reply_text("✅ تم التحميل!", reply_markup=InlineKeyboardMarkup(btn_new))
+            os.remove(path); await msg.delete()
+        except:
+            btn_new = [[InlineKeyboardButton("🔄 عملية جديدة", callback_data="new_proc")]]
+            await msg.edit_text("❌ فشل التحميل.", reply_markup=InlineKeyboardMarkup(btn_new))
+
+# --- 5. التشغيل ---
 if __name__ == "__main__":
-    # تشغيل سيرفر ويب بسيط للبقاء حياً على Render
-    def srv():
+    def run_srv():
         HTTPServer(('0.0.0.0', int(os.environ.get("PORT", 8080))), type('S', (BaseHTTPRequestHandler,), {'do_GET': lambda s: (s.send_response(200), s.end_headers(), s.wfile.write(b"OK"))})).serve_forever()
-    threading.Thread(target=srv, daemon=True).start()
+    threading.Thread(target=run_srv, daemon=True).start()
 
-    print("🚀 CYBORG HD READY!")
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(query_handler))
+    app.add_handler(CallbackQueryHandler(callback_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-    app.run_polling()
+    app.run_polling(drop_pending_updates=True)
