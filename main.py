@@ -10,18 +10,21 @@ from telegram.ext import (
     CallbackQueryHandler, ContextTypes, filters
 )
 
-# --- 1. إعداد السرفر الوهمي لـ Render ---
+# --- 1. إعداد السرفر الوهمي (Web Server) لـ Render ---
 app_web = Flask('')
 
 @app_web.route('/')
 def home():
-    return "Bot is Alive!"
+    return "Bot is Alive and Running!"
 
 def run_flask():
-    app_web.run(host='0.0.0.0', port=8080)
+    # Render يستخدم المنفذ 8080 بشكل افتراضي أو يحدده عبر البيئة
+    port = int(os.environ.get('PORT', 8080))
+    app_web.run(host='0.0.0.0', port=port)
 
 def keep_alive():
     t = Thread(target=run_flask)
+    t.daemon = True
     t.start()
 
 # --- 2. الإعدادات والمعلومات ---
@@ -57,14 +60,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     add_user(user.id)
     context.user_data.clear()
+    
     kb = [['🔄 بدء من جديد', '📊 إحصائيات'], ['👨‍💻 المطور', '📢 القنوات']]
     markup = ReplyKeyboardMarkup(kb, resize_keyboard=True)
+    
     welcome_text = (
         f"👋 أهلاً بك يا {user.first_name}\n\n"
         f"⚡ <b>{BOT_NAME}</b>\n"
         "قم بإرسال رابط (تيك توك، إنستا، يوتيوب) وسأقوم بمعالجته فوراً.\n\n"
         "⚠️ تأكد من أن الحساب عام وليس خاص."
     )
+    
     if update.callback_query:
         await context.bot.send_message(chat_id=user.id, text=welcome_text, reply_markup=markup, parse_mode=ParseMode.HTML)
     else:
@@ -83,10 +89,11 @@ def progress_hook(d, context, chat_id, message_id, loop):
             loop
         )
 
-# --- 7. معالج النصوص ---
+# --- 7. معالج الرسائل النصية ---
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     user_id = update.effective_user.id
+
     if text == '🔄 بدء من جديد':
         await start(update, context); return
     elif text == '📊 إحصائيات':
@@ -97,26 +104,32 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif text == '📢 القنوات':
         links = "\n".join([f"🔗 {c}" for c in CHANNELS])
         await update.message.reply_text(f"📢 <b>قنواتنا الرسمية:</b>\n{links}", parse_mode=ParseMode.HTML); return
+
     if "http" in text:
         if not await is_subscribed(context, user_id):
-            await update.message.reply_text("<b>⚠️ عذراً! يجب الاشتراك في القنوات أولاً.</b>", parse_mode=ParseMode.HTML); return
+            await update.message.reply_text("<b>⚠️ عذراً! يجب الاشتراك في القنوات أولاً لتتمكن من التحميل.</b>", parse_mode=ParseMode.HTML); return
+        
         context.user_data['url'] = text
         btns = [[InlineKeyboardButton("🎬 فيديو (MP4)", callback_data="dl_video"),
                  InlineKeyboardButton("🎵 صوت (Audio)", callback_data="dl_audio")]]
-        await update.message.reply_text(f"📥 <b>{BOT_NAME}\nاختر الصيغة:</b>", reply_markup=InlineKeyboardMarkup(btns), parse_mode=ParseMode.HTML)
+        await update.message.reply_text(f"📥 <b>{BOT_NAME}\nاختر الصيغة المطلوبة:</b>", reply_markup=InlineKeyboardMarkup(btns), parse_mode=ParseMode.HTML)
 
-# --- 8. محرك التحميل والرفع ---
+# --- 8. معالجة التحميل والرفع ---
 async def process_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     if query.data == "restart_bot":
         await query.answer(); await start(update, context); return
+
     await query.answer()
     user_id = query.from_user.id
     url = context.user_data.get('url')
+    
     if not url: return
+
     action = query.data
     loop = asyncio.get_event_loop()
     status = await context.bot.send_message(user_id, "⌛ <b>جاري بدء المعالجة...</b>", parse_mode=ParseMode.HTML)
+
     ydl_opts = {
         'quiet': True, 'no_warnings': True, 'nocheckcertificate': True,
         'outtmpl': f'file_{user_id}.%(ext)s',
@@ -124,32 +137,43 @@ async def process_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
         'progress_hooks': [lambda d: progress_hook(d, context, user_id, status.message_id, loop)],
         'user_agent': 'Mozilla/5.0'
     }
+
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = await asyncio.to_thread(ydl.extract_info, url, download=True)
             file_path = ydl.prepare_filename(info)
+
         await status.edit_text("📤 <b>جاري الرفع الآن...</b>", parse_mode=ParseMode.HTML)
         caption_text = f"✨ <b>تم التحميل بواسطة:</b> {DEV_USER}"
+        
         with open(file_path, 'rb') as f:
             if action == "dl_audio":
                 await context.bot.send_audio(chat_id=user_id, audio=f, caption=caption_text, parse_mode=ParseMode.HTML)
             else:
                 await context.bot.send_video(chat_id=user_id, video=f, caption=caption_text, parse_mode=ParseMode.HTML)
+        
         await status.delete()
         context.user_data.clear()
+
         restart_btn = [[InlineKeyboardButton("🔄 بدء تحميل جديد", callback_data="restart_bot")]]
         await context.bot.send_message(chat_id=user_id, text=f"✨ <b>اكتملت العملية بنجاح!</b>\n🙏 <b>شكراً لاستخدامك {BOT_NAME}</b>", reply_markup=InlineKeyboardMarkup(restart_btn), parse_mode=ParseMode.HTML)
+        
         if os.path.exists(file_path): os.remove(file_path)
+
     except Exception:
-        await status.edit_text("❌ <b>حدث خطأ!</b> حاول مرة أخرى.", parse_mode=ParseMode.HTML)
+        await status.edit_text("❌ <b>حدث خطأ!</b>\nتأكد من أن الرابط عام أو حاول مرة أخرى.", parse_mode=ParseMode.HTML)
         context.user_data.clear()
 
 # --- 9. التشغيل النهائي ---
 if __name__ == "__main__":
-    keep_alive() # تشغيل السرفر الوهمي للبقاء مستيقظاً على Render
+    # تشغيل السيرفر الوهمي للبقاء مستيقظاً على Render
+    keep_alive() 
+    
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
     app.add_handler(CallbackQueryHandler(process_download))
-    print(f"✅ {BOT_NAME} يعمل الآن على Render.")
+    
+    print(f"✅ {BOT_NAME} يعمل الآن بكفاءة.")
+    # drop_pending_updates تتجاهل الرسائل التي أُرسلت والبوت مطفأ
     app.run_polling(drop_pending_updates=True)
