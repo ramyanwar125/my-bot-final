@@ -11,7 +11,7 @@ from telegram.ext import (
     CallbackQueryHandler, ContextTypes, filters
 )
 
-# --- 1. إعداد السرفر (Render) لإبقاء البوت حياً ---
+# --- 1. إعداد السرفر للبقاء حياً (Render) ---
 app_web = Flask('')
 
 @app_web.route('/')
@@ -27,15 +27,16 @@ def keep_alive():
     t.daemon = True
     t.start()
 
-# --- 2. الإعدادات ---
+# --- 2. الإعدادات العامة ---
 TOKEN = "8254937829:AAGgMOc0z68Rqm5MAoURNmZNslH60o2LDJw" 
 ADMIN_ID = 7349033289 
 DEV_USER = "@TOP_1UP"
 BOT_NAME = "『 ＦＡＳＴ ＭＥＤＩＡ 』"
 CHANNELS = ["@T_U_H1", "@T_U_H2", "@Mega0Net", "@Fast_Mediia"]
 USERS_FILE = "users.txt"
+COOKIES_FILE = "cookies.txt" # تم تعديل الاسم هنا ليطابق ملفك
 
-# --- 3. إدارة البيانات والاشتراك ---
+# --- 3. وظائف المساعدة والاشتراك ---
 def add_user(user_id):
     if not os.path.exists(USERS_FILE):
         with open(USERS_FILE, "w") as f: pass
@@ -54,12 +55,11 @@ async def is_subscribed(context, user_id):
         except: return False
     return True
 
-# --- 4. معالج الأخطاء العالمي (حل مشكلة NetworkError) ---
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """إدارة أخطاء الشبكة والطلبات لضمان عدم توقف البوت"""
-    print(f"⚠️ تنبيه خطأ: {context.error}")
+    """معالج الأخطاء لمنع انهيار البوت عند حدوث NetworkError"""
+    print(f"⚠️ خطأ في النظام: {context.error}")
 
-# --- 5. واجهة البداية ---
+# --- 4. أوامر الواجهة ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     add_user(user.id)
@@ -71,8 +71,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     welcome_text = (
         f"👋 أهلاً بك يا {user.first_name}\n\n"
         f"⚡ <b>{BOT_NAME}</b>\n"
-        "قم بإرسال رابط (تيك توك، إنستا، يوتيوب) وسأقوم بمعالجته فوراً.\n\n"
-        "⚠️ تأكد من أن الحساب عام وليس خاص."
+        "أرسل رابط فيديو (YouTube, Instagram, TikTok) وسأقوم بمعالجته.\n\n"
+        "⚠️ تأكد أن المحساب عام وليس خاص."
     )
     
     if update.callback_query:
@@ -80,92 +80,97 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text(welcome_text, reply_markup=markup, parse_mode=ParseMode.HTML)
 
-# --- 6. الإحصائيات (للأدمن) ---
 async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id == ADMIN_ID:
         count = len(open(USERS_FILE).readlines()) if os.path.exists(USERS_FILE) else 0
-        await update.message.reply_text(f"📊 <b>إحصائيات المشتركين:</b>\n\nعدد المستخدمين: <code>{count}</code>", parse_mode=ParseMode.HTML)
+        await update.message.reply_text(f"📊 إحصائيات المشتركين: <code>{count}</code>", parse_mode=ParseMode.HTML)
 
-# --- 7. معالج الرسائل ---
+# --- 5. معالج الرسائل ---
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     user_id = update.effective_user.id
 
     if text == '🔄 بدء من جديد': await start(update, context); return
-    elif text == '👨‍💻 المطور': await update.message.reply_text(f"👑 <b>مطور البوت:</b> {DEV_USER}", parse_mode=ParseMode.HTML); return
+    elif text == '👨‍💻 المطور': await update.message.reply_text(f"👑 المطور: {DEV_USER}"); return
     elif text == '📢 القنوات':
         links = "\n".join([f"🔗 {c}" for c in CHANNELS])
-        await update.message.reply_text(f"📢 <b>قنواتنا الرسمية:</b>\n{links}", parse_mode=ParseMode.HTML); return
+        await update.message.reply_text(f"📢 قنواتنا:\n{links}"); return
 
     if "http" in text:
         if not await is_subscribed(context, user_id):
-            await update.message.reply_text("<b>⚠️ عذراً! يجب الاشتراك في القنوات أولاً لتتمكن من التحميل.</b>", parse_mode=ParseMode.HTML); return
+            await update.message.reply_text("<b>⚠️ عذراً! يجب الاشتراك في القنوات أولاً.</b>", parse_mode=ParseMode.HTML); return
         
         context.user_data['url'] = text
         btns = [[InlineKeyboardButton("🎬 فيديو (MP4)", callback_data="dl_video"),
-                 InlineKeyboardButton("🎵 صوت (Audio)", callback_data="dl_audio")]]
-        await update.message.reply_text(f"📥 <b>اختر الصيغة المطلوبة:</b>", reply_markup=InlineKeyboardMarkup(btns), parse_mode=ParseMode.HTML)
+                 InlineKeyboardButton("🎵 صوت (MP3)", callback_data="dl_audio")]]
+        await update.message.reply_text(f"📥 اختر الصيغة المطلوبة:", reply_markup=InlineKeyboardMarkup(btns), parse_mode=ParseMode.HTML)
 
-# --- 8. التحميل والرفع (مع زيادة التوقيت Timeout) ---
+# --- 6. عملية التحميل والرفع (القلب النابض للبوت) ---
 async def process_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    if query.data == "restart_bot": 
-        await query.answer(); await start(update, context); return
-    
     await query.answer()
     user_id = query.from_user.id
     url = context.user_data.get('url')
     if not url: return
 
     action = query.data
-    status = await context.bot.send_message(user_id, "⌛ <b>جاري جلب بيانات الرابط...</b>", parse_mode=ParseMode.HTML)
+    status = await context.bot.send_message(user_id, "⌛ <b>جاري التحميل والمعالجة...</b>", parse_mode=ParseMode.HTML)
 
-    file_path = f"file_{user_id}"
+    # إنشاء اسم فريد للملف
+    file_prefix = f"file_{user_id}_{os.urandom(2).hex()}"
+    
     ydl_opts = {
-        'quiet': True, 'no_warnings': True, 'outtmpl': f'{file_path}.%(ext)s',
-        'format': 'best' if action == "dl_video" else 'bestaudio/best',
-        'user_agent': 'Mozilla/5.0'
+        'quiet': True,
+        'no_warnings': True,
+        'cookiefile': COOKIES_FILE if os.path.exists(COOKIES_FILE) else None,
+        'outtmpl': f'{file_prefix}.%(ext)s',
+        'noplaylist': True,
+        # تحديد الحجم الأقصى ليتوافق مع تليجرام (أقل من 50 ميجا)
+        'format': 'best[ext=mp4][filesize<48M]/best[filesize<48M]/best' if action == "dl_video" else 'bestaudio/best',
+        'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     }
 
     try:
+        # مرحلة التحميل من الشبكة
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = await asyncio.to_thread(ydl.extract_info, url, download=True)
             downloaded_file = ydl.prepare_filename(info)
 
-        await status.edit_text("📤 <b>جاري رفع الملف إلى تليجرام...</b>", parse_mode=ParseMode.HTML)
+        await status.edit_text("📤 <b>جاري الرفع إلى تليجرام...</b>", parse_mode=ParseMode.HTML)
         
+        # مرحلة الرفع إلى تليجرام مع زيادة مهلة الانتظار لرفع الملفات الكبيرة
         with open(downloaded_file, 'rb') as f:
-            # تم إضافة timeouts لضمان عدم حدوث NetworkError أثناء الرفع
             if action == "dl_audio":
-                await context.bot.send_audio(chat_id=user_id, audio=f, caption=f"✨ بواسطة {DEV_USER}", connect_timeout=60, read_timeout=60)
+                await context.bot.send_audio(chat_id=user_id, audio=f, caption=f"✨ بواسطة {DEV_USER}", read_timeout=180, write_timeout=180)
             else:
-                await context.bot.send_video(chat_id=user_id, video=f, caption=f"✨ بواسطة {DEV_USER}", connect_timeout=60, read_timeout=60)
+                await context.bot.send_video(chat_id=user_id, video=f, caption=f"✨ بواسطة {DEV_USER}", read_timeout=180, write_timeout=180)
         
         await status.delete()
 
     except Exception as e:
-        print(f"Error logic: {e}")
-        await status.edit_text("❌ حدث خطأ! قد يكون الرابط غير مدعوم أو الملف كبير جداً.", parse_mode=ParseMode.HTML)
+        print(f"Detailed Error: {e}")
+        await status.edit_text("❌ حدث خطأ! قد يكون الرابط محمياً، خاصاً، أو أن الفيديو يتجاوز حجمه 50MB.")
     
     finally:
+        # تنظيف السيرفر من الملفات فور الانتهاء
         context.user_data.clear()
-        # تنظيف الملفات من السيرفر لتوفير المساحة
         if 'downloaded_file' in locals() and os.path.exists(downloaded_file):
-            os.remove(downloaded_file)
+            try: os.remove(downloaded_file)
+            except: pass
 
-# --- 9. التشغيل النهائي ---
+# --- 7. تشغيل البوت ---
 if __name__ == "__main__":
-    keep_alive()
+    keep_alive() # تشغيل سيرفر الويب في الخلفية
     app = ApplicationBuilder().token(TOKEN).build()
     
-    # إضافة المستقبلات
+    # الروابط
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("stats", admin_stats))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
     app.add_handler(CallbackQueryHandler(process_download))
     
-    # الحل السحري لمشكلة NetworkError
+    # معالج الأخطاء لحل مشكلة NetworkError نهائياً
     app.add_error_handler(error_handler)
-
-    print(f"✅ {BOT_NAME} يعمل الآن بثبات.")
+    
+    print(f"✅ {BOT_NAME} يعمل الآن.")
     app.run_polling(drop_pending_updates=True)
