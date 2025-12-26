@@ -11,7 +11,7 @@ from telegram.ext import (
     CallbackQueryHandler, ContextTypes, filters
 )
 
-# --- 1. إعداد السرفر (Render) ---
+# --- 1. إعداد السرفر (Render) لإبقاء البوت حياً ---
 app_web = Flask('')
 
 @app_web.route('/')
@@ -35,7 +35,7 @@ BOT_NAME = "『 ＦＡＳＴ ＭＥＤＩＡ 』"
 CHANNELS = ["@T_U_H1", "@T_U_H2", "@Mega0Net", "@Fast_Mediia"]
 USERS_FILE = "users.txt"
 
-# --- 3. إدارة البيانات ---
+# --- 3. إدارة البيانات والاشتراك ---
 def add_user(user_id):
     if not os.path.exists(USERS_FILE):
         with open(USERS_FILE, "w") as f: pass
@@ -54,13 +54,17 @@ async def is_subscribed(context, user_id):
         except: return False
     return True
 
-# --- 4. واجهة البداية (تم تعديل الأزرار هنا) ---
+# --- 4. معالج الأخطاء العالمي (حل مشكلة NetworkError) ---
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """إدارة أخطاء الشبكة والطلبات لضمان عدم توقف البوت"""
+    print(f"⚠️ تنبيه خطأ: {context.error}")
+
+# --- 5. واجهة البداية ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     add_user(user.id)
     context.user_data.clear()
     
-    # قائمة الأزرار بدون "إحصائيات"
     kb = [['🔄 بدء من جديد'], ['👨‍💻 المطور', '📢 القنوات']]
     markup = ReplyKeyboardMarkup(kb, resize_keyboard=True)
     
@@ -76,13 +80,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text(welcome_text, reply_markup=markup, parse_mode=ParseMode.HTML)
 
-# --- 5. الإحصائيات (للأدمن فقط عبر أمر /stats) ---
+# --- 6. الإحصائيات (للأدمن) ---
 async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id == ADMIN_ID:
         count = len(open(USERS_FILE).readlines()) if os.path.exists(USERS_FILE) else 0
-        await update.message.reply_text(f"📊 <b>إحصائياتك الخاصة:</b>\n\nعدد المشتركين: <code>{count}</code>", parse_mode=ParseMode.HTML)
+        await update.message.reply_text(f"📊 <b>إحصائيات المشتركين:</b>\n\nعدد المستخدمين: <code>{count}</code>", parse_mode=ParseMode.HTML)
 
-# --- 6. معالج الرسائل ---
+# --- 7. معالج الرسائل ---
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     user_id = update.effective_user.id
@@ -95,26 +99,30 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if "http" in text:
         if not await is_subscribed(context, user_id):
-            await update.message.reply_text("<b>⚠️ عذراً! يجب الاشتراك في القنوات أولاً.</b>", parse_mode=ParseMode.HTML); return
+            await update.message.reply_text("<b>⚠️ عذراً! يجب الاشتراك في القنوات أولاً لتتمكن من التحميل.</b>", parse_mode=ParseMode.HTML); return
+        
         context.user_data['url'] = text
         btns = [[InlineKeyboardButton("🎬 فيديو (MP4)", callback_data="dl_video"),
                  InlineKeyboardButton("🎵 صوت (Audio)", callback_data="dl_audio")]]
         await update.message.reply_text(f"📥 <b>اختر الصيغة المطلوبة:</b>", reply_markup=InlineKeyboardMarkup(btns), parse_mode=ParseMode.HTML)
 
-# --- 7. التحميل والرفع ---
+# --- 8. التحميل والرفع (مع زيادة التوقيت Timeout) ---
 async def process_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    if query.data == "restart_bot": await query.answer(); await start(update, context); return
+    if query.data == "restart_bot": 
+        await query.answer(); await start(update, context); return
+    
     await query.answer()
     user_id = query.from_user.id
     url = context.user_data.get('url')
     if not url: return
 
     action = query.data
-    status = await context.bot.send_message(user_id, "⌛ <b>جاري المعالجة...</b>", parse_mode=ParseMode.HTML)
+    status = await context.bot.send_message(user_id, "⌛ <b>جاري جلب بيانات الرابط...</b>", parse_mode=ParseMode.HTML)
 
+    file_path = f"file_{user_id}"
     ydl_opts = {
-        'quiet': True, 'no_warnings': True, 'outtmpl': f'file_{user_id}.%(ext)s',
+        'quiet': True, 'no_warnings': True, 'outtmpl': f'{file_path}.%(ext)s',
         'format': 'best' if action == "dl_video" else 'bestaudio/best',
         'user_agent': 'Mozilla/5.0'
     }
@@ -122,28 +130,42 @@ async def process_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = await asyncio.to_thread(ydl.extract_info, url, download=True)
-            file_path = ydl.prepare_filename(info)
+            downloaded_file = ydl.prepare_filename(info)
 
-        await status.edit_text("📤 <b>جاري الرفع...</b>", parse_mode=ParseMode.HTML)
-        with open(file_path, 'rb') as f:
+        await status.edit_text("📤 <b>جاري رفع الملف إلى تليجرام...</b>", parse_mode=ParseMode.HTML)
+        
+        with open(downloaded_file, 'rb') as f:
+            # تم إضافة timeouts لضمان عدم حدوث NetworkError أثناء الرفع
             if action == "dl_audio":
-                await context.bot.send_audio(chat_id=user_id, audio=f, caption=f"✨ بواسطة {DEV_USER}", parse_mode=ParseMode.HTML)
+                await context.bot.send_audio(chat_id=user_id, audio=f, caption=f"✨ بواسطة {DEV_USER}", connect_timeout=60, read_timeout=60)
             else:
-                await context.bot.send_video(chat_id=user_id, video=f, caption=f"✨ بواسطة {DEV_USER}", parse_mode=ParseMode.HTML)
+                await context.bot.send_video(chat_id=user_id, video=f, caption=f"✨ بواسطة {DEV_USER}", connect_timeout=60, read_timeout=60)
         
         await status.delete()
-        context.user_data.clear()
-        if os.path.exists(file_path): os.remove(file_path)
-    except Exception:
-        await status.edit_text("❌ حدث خطأ في الرابط.", parse_mode=ParseMode.HTML)
 
-# --- 8. التشغيل ---
+    except Exception as e:
+        print(f"Error logic: {e}")
+        await status.edit_text("❌ حدث خطأ! قد يكون الرابط غير مدعوم أو الملف كبير جداً.", parse_mode=ParseMode.HTML)
+    
+    finally:
+        context.user_data.clear()
+        # تنظيف الملفات من السيرفر لتوفير المساحة
+        if 'downloaded_file' in locals() and os.path.exists(downloaded_file):
+            os.remove(downloaded_file)
+
+# --- 9. التشغيل النهائي ---
 if __name__ == "__main__":
     keep_alive()
     app = ApplicationBuilder().token(TOKEN).build()
+    
+    # إضافة المستقبلات
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("stats", admin_stats)) # أمر سري لك فقط
+    app.add_handler(CommandHandler("stats", admin_stats))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
     app.add_handler(CallbackQueryHandler(process_download))
-    print(f"✅ {BOT_NAME} يعمل الآن.")
+    
+    # الحل السحري لمشكلة NetworkError
+    app.add_error_handler(error_handler)
+
+    print(f"✅ {BOT_NAME} يعمل الآن بثبات.")
     app.run_polling(drop_pending_updates=True)
