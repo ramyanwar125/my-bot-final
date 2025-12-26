@@ -1,6 +1,7 @@
 import os
 import asyncio
 import yt_dlp
+import subprocess
 from flask import Flask
 from threading import Thread
 from waitress import serve
@@ -11,7 +12,7 @@ from telegram.ext import (
     CallbackQueryHandler, ContextTypes, filters
 )
 
-# --- 1. إعداد السرفر للبقاء حياً (Render) ---
+# --- 1. إعداد السرفر للبقاء حياً ---
 app_web = Flask('')
 
 @app_web.route('/')
@@ -27,16 +28,16 @@ def keep_alive():
     t.daemon = True
     t.start()
 
-# --- 2. الإعدادات العامة ---
+# --- 2. الإعدادات ---
 TOKEN = "8254937829:AAGgMOc0z68Rqm5MAoURNmZNslH60o2LDJw" 
 ADMIN_ID = 7349033289 
 DEV_USER = "@TOP_1UP"
 BOT_NAME = "『 ＦＡＳＴ ＭＥＤＩＡ 』"
 CHANNELS = ["@T_U_H1", "@T_U_H2", "@Mega0Net", "@Fast_Mediia"]
 USERS_FILE = "users.txt"
-COOKIES_FILE = "cookies.txt" # تم تعديل الاسم هنا ليطابق ملفك
+COOKIES_FILE = "cookies.txt"
 
-# --- 3. وظائف المساعدة والاشتراك ---
+# --- 3. إدارة البيانات والاشتراك ---
 def add_user(user_id):
     if not os.path.exists(USERS_FILE):
         with open(USERS_FILE, "w") as f: pass
@@ -56,34 +57,22 @@ async def is_subscribed(context, user_id):
     return True
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """معالج الأخطاء لمنع انهيار البوت عند حدوث NetworkError"""
-    print(f"⚠️ خطأ في النظام: {context.error}")
+    print(f"⚠️ خطأ: {context.error}")
 
-# --- 4. أوامر الواجهة ---
+# --- 4. أوامر البوت ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     add_user(user.id)
     context.user_data.clear()
-    
     kb = [['🔄 بدء من جديد'], ['👨‍💻 المطور', '📢 القنوات']]
     markup = ReplyKeyboardMarkup(kb, resize_keyboard=True)
-    
-    welcome_text = (
-        f"👋 أهلاً بك يا {user.first_name}\n\n"
-        f"⚡ <b>{BOT_NAME}</b>\n"
-        "أرسل رابط فيديو (YouTube, Instagram, TikTok) وسأقوم بمعالجته.\n\n"
-        "⚠️ تأكد أن المحساب عام وليس خاص."
-    )
-    
-    if update.callback_query:
-        await context.bot.send_message(chat_id=user.id, text=welcome_text, reply_markup=markup, parse_mode=ParseMode.HTML)
-    else:
-        await update.message.reply_text(welcome_text, reply_markup=markup, parse_mode=ParseMode.HTML)
+    welcome_text = f"👋 أهلاً بك يا {user.first_name}\n\n⚡ <b>{BOT_NAME}</b>\nأرسل رابط فيديو لتحميله بأعلى جودة."
+    await update.message.reply_text(welcome_text, reply_markup=markup, parse_mode=ParseMode.HTML)
 
 async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id == ADMIN_ID:
         count = len(open(USERS_FILE).readlines()) if os.path.exists(USERS_FILE) else 0
-        await update.message.reply_text(f"📊 إحصائيات المشتركين: <code>{count}</code>", parse_mode=ParseMode.HTML)
+        await update.message.reply_text(f"📊 عدد المشتركين: {count}")
 
 # --- 5. معالج الرسائل ---
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -98,14 +87,13 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if "http" in text:
         if not await is_subscribed(context, user_id):
-            await update.message.reply_text("<b>⚠️ عذراً! يجب الاشتراك في القنوات أولاً.</b>", parse_mode=ParseMode.HTML); return
-        
+            await update.message.reply_text("<b>⚠️ اشترك في القنوات أولاً!</b>", parse_mode=ParseMode.HTML); return
         context.user_data['url'] = text
-        btns = [[InlineKeyboardButton("🎬 فيديو (MP4)", callback_data="dl_video"),
+        btns = [[InlineKeyboardButton("🎬 فيديو (أعلى جودة)", callback_data="dl_video"),
                  InlineKeyboardButton("🎵 صوت (MP3)", callback_data="dl_audio")]]
-        await update.message.reply_text(f"📥 اختر الصيغة المطلوبة:", reply_markup=InlineKeyboardMarkup(btns), parse_mode=ParseMode.HTML)
+        await update.message.reply_text(f"📥 اختر الصيغة:", reply_markup=InlineKeyboardMarkup(btns), parse_mode=ParseMode.HTML)
 
-# --- 6. عملية التحميل والرفع (القلب النابض للبوت) ---
+# --- 6. عملية التحميل (الجودة القصوى) ---
 async def process_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -114,9 +102,8 @@ async def process_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not url: return
 
     action = query.data
-    status = await context.bot.send_message(user_id, "⌛ <b>جاري التحميل والمعالجة...</b>", parse_mode=ParseMode.HTML)
+    status = await context.bot.send_message(user_id, "⌛ <b>جاري التحميل بأعلى جودة...</b>", parse_mode=ParseMode.HTML)
 
-    # إنشاء اسم فريد للملف
     file_prefix = f"file_{user_id}_{os.urandom(2).hex()}"
     
     ydl_opts = {
@@ -125,52 +112,51 @@ async def process_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
         'cookiefile': COOKIES_FILE if os.path.exists(COOKIES_FILE) else None,
         'outtmpl': f'{file_prefix}.%(ext)s',
         'noplaylist': True,
-        # تحديد الحجم الأقصى ليتوافق مع تليجرام (أقل من 50 ميجا)
-        'format': 'best[ext=mp4][filesize<48M]/best[filesize<48M]/best' if action == "dl_video" else 'bestaudio/best',
+        'format': 'bestvideo+bestaudio/best' if action == "dl_video" else 'bestaudio/best',
         'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'merge_output_format': 'mp4',
     }
 
     try:
-        # مرحلة التحميل من الشبكة
+        # تحديث المكتبة تلقائياً لكسر حماية يوتيوب
+        subprocess.run(["pip", "install", "-U", "yt-dlp"], stdout=subprocess.DEVNULL)
+
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = await asyncio.to_thread(ydl.extract_info, url, download=True)
             downloaded_file = ydl.prepare_filename(info)
+            # التأكد من الامتداد بعد الدمج
+            if not os.path.exists(downloaded_file) and os.path.exists(downloaded_file.rsplit('.', 1)[0] + ".mp4"):
+                downloaded_file = downloaded_file.rsplit('.', 1)[0] + ".mp4"
 
-        await status.edit_text("📤 <b>جاري الرفع إلى تليجرام...</b>", parse_mode=ParseMode.HTML)
+        await status.edit_text("📤 <b>جاري الرفع... قد يستغرق وقتاً للجودة العالية</b>", parse_mode=ParseMode.HTML)
         
-        # مرحلة الرفع إلى تليجرام مع زيادة مهلة الانتظار لرفع الملفات الكبيرة
         with open(downloaded_file, 'rb') as f:
+            # مهلة 10 دقائق للرفع (600 ثانية)
             if action == "dl_audio":
-                await context.bot.send_audio(chat_id=user_id, audio=f, caption=f"✨ بواسطة {DEV_USER}", read_timeout=180, write_timeout=180)
+                await context.bot.send_audio(chat_id=user_id, audio=f, caption=f"✨ بواسطة {DEV_USER}", read_timeout=600)
             else:
-                await context.bot.send_video(chat_id=user_id, video=f, caption=f"✨ بواسطة {DEV_USER}", read_timeout=180, write_timeout=180)
+                await context.bot.send_video(chat_id=user_id, video=f, caption=f"✨ بواسطة {DEV_USER}", read_timeout=600, supports_streaming=True)
         
         await status.delete()
 
     except Exception as e:
-        print(f"Detailed Error: {e}")
-        await status.edit_text("❌ حدث خطأ! قد يكون الرابط محمياً، خاصاً، أو أن الفيديو يتجاوز حجمه 50MB.")
+        print(f"Error: {e}")
+        await status.edit_text(f"❌ خطأ: الحجم قد يتجاوز 50MB أو الرابط غير مدعوم.")
     
     finally:
-        # تنظيف السيرفر من الملفات فور الانتهاء
         context.user_data.clear()
         if 'downloaded_file' in locals() and os.path.exists(downloaded_file):
             try: os.remove(downloaded_file)
             except: pass
 
-# --- 7. تشغيل البوت ---
+# --- 7. التشغيل ---
 if __name__ == "__main__":
-    keep_alive() # تشغيل سيرفر الويب في الخلفية
+    keep_alive()
     app = ApplicationBuilder().token(TOKEN).build()
-    
-    # الروابط
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("stats", admin_stats))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
     app.add_handler(CallbackQueryHandler(process_download))
-    
-    # معالج الأخطاء لحل مشكلة NetworkError نهائياً
     app.add_error_handler(error_handler)
-    
-    print(f"✅ {BOT_NAME} يعمل الآن.")
+    print(f"✅ {BOT_NAME} Online.")
     app.run_polling(drop_pending_updates=True)
