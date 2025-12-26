@@ -1,23 +1,17 @@
 import os
 import asyncio
 import yt_dlp
-import subprocess
 from flask import Flask
 from threading import Thread
 from waitress import serve
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
+from telegram import Update, ReplyKeyboardMarkup
 from telegram.constants import ParseMode
-from telegram.ext import (
-    ApplicationBuilder, CommandHandler, MessageHandler, 
-    CallbackQueryHandler, ContextTypes, filters
-)
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 
-# --- 1. إعداد السرفر للبقاء حياً ---
+# --- 1. سرفر الويب للبقاء حياً ---
 app_web = Flask('')
-
 @app_web.route('/')
-def home():
-    return "⚡ 『 ＦＡＳＴ ＭＥＤＩＡ 』 Is Online!"
+def home(): return "⚡ FAST MEDIA Is Online!"
 
 def run_flask():
     port = int(os.environ.get('PORT', 8080))
@@ -37,12 +31,14 @@ CHANNELS = ["@T_U_H1", "@T_U_H2", "@Mega0Net", "@Fast_Mediia"]
 USERS_FILE = "users.txt"
 COOKIES_FILE = "cookies.txt"
 
-# --- 3. إدارة البيانات والاشتراك ---
-def add_user(user_id):
-    if not os.path.exists(USERS_FILE):
-        with open(USERS_FILE, "w") as f: pass
+# --- 3. وظائف الإدارة والبيانات ---
+def get_users_list():
+    if not os.path.exists(USERS_FILE): return []
     with open(USERS_FILE, "r") as f:
-        users = f.read().splitlines()
+        return f.read().splitlines()
+
+def add_user(user_id):
+    users = get_users_list()
     if str(user_id) not in users:
         with open(USERS_FILE, "a") as f:
             f.write(f"{user_id}\n")
@@ -56,107 +52,110 @@ async def is_subscribed(context, user_id):
         except: return False
     return True
 
-async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-    print(f"⚠️ خطأ: {context.error}")
-
-# --- 4. أوامر البوت ---
+# --- 4. واجهة الترحيب المطلوبة ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     add_user(user.id)
-    context.user_data.clear()
-    kb = [['🔄 بدء من جديد'], ['👨‍💻 المطور', '📢 القنوات']]
+    
+    kb = [['🔄 بدء من جديد'], ['📢 القنوات']]
+    if user.id == ADMIN_ID:
+        kb.append(['📊 الإحصائيات', '📣 إذاعة'])
+    kb.append(['👨‍💻 المطور'])
+    
     markup = ReplyKeyboardMarkup(kb, resize_keyboard=True)
-    welcome_text = f"👋 أهلاً بك يا {user.first_name}\n\n⚡ <b>{BOT_NAME}</b>\nأرسل رابط فيديو لتحميله بأعلى جودة."
+    
+    welcome_text = (
+        f"✨━━━━━━━━━━━━━✨\n"
+        f"  🙋‍♂️ أهلاً بك يا <b>{user.first_name}</b>\n"
+        f"  🌟 في عالم {BOT_NAME}\n"
+        f"✨━━━━━━━━━━━━━✨\n\n"
+        f"🚀 أنا بوت سريع جداً لتحميل الفيديوهات\n"
+        f"📱 من المنصات التالية بأعلى جودة:\n\n"
+        f"📸 Instagram | 🎵 TikTok\n"
+        f"👻 Snapchat  | 🔵 Facebook\n\n"
+        f"👇 فقط أرسل الرابط واترك الباقي عليّ!"
+    )
     await update.message.reply_text(welcome_text, reply_markup=markup, parse_mode=ParseMode.HTML)
 
-async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id == ADMIN_ID:
-        count = len(open(USERS_FILE).readlines()) if os.path.exists(USERS_FILE) else 0
-        await update.message.reply_text(f"📊 عدد المشتركين: {count}")
-
-# --- 5. معالج الرسائل ---
+# --- 5. معالج الرسائل والإدارة ---
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     user_id = update.effective_user.id
 
-    if text == '🔄 بدء من جديد': await start(update, context); return
-    elif text == '👨‍💻 المطور': await update.message.reply_text(f"👑 المطور: {DEV_USER}"); return
+    if text == '🔄 بدء من جديد':
+        await start(update, context)
+        return
+    elif text == '👨‍💻 المطور':
+        await update.message.reply_text(f"👑 <b>المطور المسؤول:</b> {DEV_USER}", parse_mode=ParseMode.HTML)
+        return
     elif text == '📢 القنوات':
         links = "\n".join([f"🔗 {c}" for c in CHANNELS])
-        await update.message.reply_text(f"📢 قنواتنا:\n{links}"); return
+        await update.message.reply_text(f"📢 <b>قنوات الاشتراك الإجباري:</b>\n\n{links}", parse_mode=ParseMode.HTML)
+        return
 
+    # أزرار المطور (الإذاعة والإحصائيات)
+    if user_id == ADMIN_ID:
+        if text == '📊 الإحصائيات':
+            count = len(get_users_list())
+            await update.message.reply_text(f"📊 <b>إحصائيات البوت الثابتة:</b>\n\n👤 عدد المشتركين: <code>{count}</code>", parse_mode=ParseMode.HTML)
+            return
+        elif text == '📣 إذاعة':
+            await update.message.reply_text("📥 <b>أرسل الآن الرسالة التي تريد إذاعتها (نص، صورة، فيديو):</b>", parse_mode=ParseMode.HTML)
+            context.user_data['waiting_for_broadcast'] = True
+            return
+        elif context.user_data.get('waiting_for_broadcast'):
+            users = get_users_list()
+            success, fail = 0, 0
+            broadcast_msg = await update.message.reply_text(f"🚀 جاري الإذاعة لـ {len(users)} مستخدم...")
+            for uid in users:
+                try:
+                    await context.bot.copy_message(chat_id=uid, from_chat_id=user_id, message_id=update.message.message_id)
+                    success += 1
+                except: fail += 1
+            await broadcast_msg.edit_text(f"✅ <b>تمت الإذاعة بنجاح!</b>\n\n🟢 نجاح: {success}\n🔴 فشل: {fail}", parse_mode=ParseMode.HTML)
+            context.user_data['waiting_for_broadcast'] = False
+            return
+
+    # معالجة الروابط (التحميل)
     if "http" in text:
         if not await is_subscribed(context, user_id):
-            await update.message.reply_text("<b>⚠️ اشترك في القنوات أولاً!</b>", parse_mode=ParseMode.HTML); return
-        context.user_data['url'] = text
-        btns = [[InlineKeyboardButton("🎬 فيديو (أعلى جودة)", callback_data="dl_video"),
-                 InlineKeyboardButton("🎵 صوت (MP3)", callback_data="dl_audio")]]
-        await update.message.reply_text(f"📥 اختر الصيغة:", reply_markup=InlineKeyboardMarkup(btns), parse_mode=ParseMode.HTML)
+            await update.message.reply_text("⚠️ <b>يجب الاشتراك في القنوات أولاً!</b>\nاضغط على زر 📢 القنوات للاشتراك.", parse_mode=ParseMode.HTML)
+            return
 
-# --- 6. عملية التحميل (الجودة القصوى) ---
-async def process_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    user_id = query.from_user.id
-    url = context.user_data.get('url')
-    if not url: return
+        status = await update.message.reply_text("⌛", parse_mode=ParseMode.HTML)
+        ydl_opts = {
+            'quiet': True, 
+            'cookiefile': COOKIES_FILE if os.path.exists(COOKIES_FILE) else None, 
+            'format': 'best[ext=mp4]/best'
+        }
 
-    action = query.data
-    status = await context.bot.send_message(user_id, "⌛ <b>جاري التحميل بأعلى جودة...</b>", parse_mode=ParseMode.HTML)
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                # استخراج المعلومات وفحص الحجم
+                info = await asyncio.to_thread(ydl.extract_info, text, download=False)
+                size_mb = (info.get('filesize') or info.get('filesize_approx') or 0) / (1024*1024)
+                
+                if size_mb > 50:
+                    await status.edit_text(f"⚠️ <b>الحجم كبير جداً ({size_mb:.1f}MB)!</b>\nتليجرام يمنع الرفع أكثر من 50MB.", parse_mode=ParseMode.HTML)
+                    return
+                
+                await status.edit_text("⏳")
+                caption = f"✅ <b>تم التحميل بنجاح!</b>\n✨ <b>بواسطة:</b> {BOT_NAME}"
+                
+                # إرسال الفيديو مباشرة
+                await context.bot.send_video(chat_id=user_id, video=info.get('url'), caption=caption, parse_mode=ParseMode.HTML)
+            
+            await status.delete()
+            # رسالة الشكر النهائية
+            await context.bot.send_message(user_id, "✨━━━━━━━━━━━━━✨\n🙏 <b>شكراً لاستخدامك خدمتنا!</b>\n✨━━━━━━━━━━━━━✨", parse_mode=ParseMode.HTML)
 
-    file_prefix = f"file_{user_id}_{os.urandom(2).hex()}"
-    
-    ydl_opts = {
-        'quiet': True,
-        'no_warnings': True,
-        'cookiefile': COOKIES_FILE if os.path.exists(COOKIES_FILE) else None,
-        'outtmpl': f'{file_prefix}.%(ext)s',
-        'noplaylist': True,
-        'format': 'bestvideo+bestaudio/best' if action == "dl_video" else 'bestaudio/best',
-        'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'merge_output_format': 'mp4',
-    }
+        except:
+            await status.edit_text("❌ <b>حدث خطأ! تأكد من أن الرابط عام وصحيح.</b>")
 
-    try:
-        # تحديث المكتبة تلقائياً لكسر حماية يوتيوب
-        subprocess.run(["pip", "install", "-U", "yt-dlp"], stdout=subprocess.DEVNULL)
-
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = await asyncio.to_thread(ydl.extract_info, url, download=True)
-            downloaded_file = ydl.prepare_filename(info)
-            # التأكد من الامتداد بعد الدمج
-            if not os.path.exists(downloaded_file) and os.path.exists(downloaded_file.rsplit('.', 1)[0] + ".mp4"):
-                downloaded_file = downloaded_file.rsplit('.', 1)[0] + ".mp4"
-
-        await status.edit_text("📤 <b>جاري الرفع... قد يستغرق وقتاً للجودة العالية</b>", parse_mode=ParseMode.HTML)
-        
-        with open(downloaded_file, 'rb') as f:
-            # مهلة 10 دقائق للرفع (600 ثانية)
-            if action == "dl_audio":
-                await context.bot.send_audio(chat_id=user_id, audio=f, caption=f"✨ بواسطة {DEV_USER}", read_timeout=600)
-            else:
-                await context.bot.send_video(chat_id=user_id, video=f, caption=f"✨ بواسطة {DEV_USER}", read_timeout=600, supports_streaming=True)
-        
-        await status.delete()
-
-    except Exception as e:
-        print(f"Error: {e}")
-        await status.edit_text(f"❌ خطأ: الحجم قد يتجاوز 50MB أو الرابط غير مدعوم.")
-    
-    finally:
-        context.user_data.clear()
-        if 'downloaded_file' in locals() and os.path.exists(downloaded_file):
-            try: os.remove(downloaded_file)
-            except: pass
-
-# --- 7. التشغيل ---
 if __name__ == "__main__":
     keep_alive()
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("stats", admin_stats))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
-    app.add_handler(CallbackQueryHandler(process_download))
-    app.add_error_handler(error_handler)
-    print(f"✅ {BOT_NAME} Online.")
+    print("🚀 FAST MEDIA IS LIVE AND READY!")
     app.run_polling(drop_pending_updates=True)
