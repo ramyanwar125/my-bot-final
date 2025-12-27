@@ -29,7 +29,6 @@ DEV_USER = "@TOP_1UP"
 BOT_NAME = "『 ＦＡＳＴ ＭＥＤＩＡ 』"
 CHANNELS = ["@T_U_H1", "@T_U_H2", "@Mega0Net", "@Fast_Mediia"]
 USERS_FILE = "users.txt"
-COOKIES_FILE = "cookies.txt"
 
 # --- 3. وظائف الإدارة والبيانات ---
 def get_users_list():
@@ -52,16 +51,13 @@ async def is_subscribed(context, user_id):
         except: return False
     return True
 
-# --- 4. واجهة الترحيب المطلوبة ---
+# --- 4. واجهة الترحيب ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     add_user(user.id)
-    
     kb = [['🔄 بدء من جديد'], ['📢 القنوات']]
-    if user.id == ADMIN_ID:
-        kb.append(['📊 الإحصائيات', '📣 إذاعة'])
+    if user.id == ADMIN_ID: kb.append(['📊 الإحصائيات', '📣 إذاعة'])
     kb.append(['👨‍💻 المطور'])
-    
     markup = ReplyKeyboardMarkup(kb, resize_keyboard=True)
     
     welcome_text = (
@@ -77,84 +73,80 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await update.message.reply_text(welcome_text, reply_markup=markup, parse_mode=ParseMode.HTML)
 
-# --- 5. معالج الرسائل والإدارة ---
+# --- 5. معالج الرسائل والتحميل ---
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     user_id = update.effective_user.id
 
-    if text == '🔄 بدء من جديد':
-        await start(update, context)
-        return
-    elif text == '👨‍💻 المطور':
-        await update.message.reply_text(f"👑 <b>المطور المسؤول:</b> {DEV_USER}", parse_mode=ParseMode.HTML)
-        return
+    if text == '🔄 بدء من جديد': await start(update, context); return
+    elif text == '👨‍💻 المطور': await update.message.reply_text(f"👑 <b>المطور المسؤول:</b> {DEV_USER}", parse_mode=ParseMode.HTML); return
     elif text == '📢 القنوات':
         links = "\n".join([f"🔗 {c}" for c in CHANNELS])
-        await update.message.reply_text(f"📢 <b>قنوات الاشتراك الإجباري:</b>\n\n{links}", parse_mode=ParseMode.HTML)
-        return
+        await update.message.reply_text(f"📢 <b>قنوات الاشتراك الإجباري:</b>\n\n{links}", parse_mode=ParseMode.HTML); return
 
-    # أزرار المطور (الإذاعة والإحصائيات)
     if user_id == ADMIN_ID:
         if text == '📊 الإحصائيات':
             count = len(get_users_list())
-            await update.message.reply_text(f"📊 <b>إحصائيات البوت الثابتة:</b>\n\n👤 عدد المشتركين: <code>{count}</code>", parse_mode=ParseMode.HTML)
-            return
+            await update.message.reply_text(f"📊 <b>إحصائيات البوت:</b> {count}", parse_mode=ParseMode.HTML); return
         elif text == '📣 إذاعة':
-            await update.message.reply_text("📥 <b>أرسل الآن الرسالة التي تريد إذاعتها (نص، صورة، فيديو):</b>", parse_mode=ParseMode.HTML)
-            context.user_data['waiting_for_broadcast'] = True
-            return
-        elif context.user_data.get('waiting_for_broadcast'):
+            await update.message.reply_text("📥 أرسل الرسالة الآن:"); context.user_data['waiting'] = True; return
+        elif context.user_data.get('waiting'):
             users = get_users_list()
-            success, fail = 0, 0
-            broadcast_msg = await update.message.reply_text(f"🚀 جاري الإذاعة لـ {len(users)} مستخدم...")
             for uid in users:
-                try:
-                    await context.bot.copy_message(chat_id=uid, from_chat_id=user_id, message_id=update.message.message_id)
-                    success += 1
-                except: fail += 1
-            await broadcast_msg.edit_text(f"✅ <b>تمت الإذاعة بنجاح!</b>\n\n🟢 نجاح: {success}\n🔴 فشل: {fail}", parse_mode=ParseMode.HTML)
-            context.user_data['waiting_for_broadcast'] = False
-            return
+                try: await context.bot.copy_message(chat_id=uid, from_chat_id=user_id, message_id=update.message.message_id)
+                except: pass
+            await update.message.reply_text("✅ تمت الإذاعة!"); context.user_data['waiting'] = False; return
 
-    # معالجة الروابط (التحميل)
     if "http" in text:
         if not await is_subscribed(context, user_id):
-            await update.message.reply_text("⚠️ <b>يجب الاشتراك في القنوات أولاً!</b>\nاضغط على زر 📢 القنوات للاشتراك.", parse_mode=ParseMode.HTML)
-            return
+            await update.message.reply_text("⚠️ اشتراك إجباري في القنوات أولاً!", parse_mode=ParseMode.HTML); return
 
+        # إرسال الساعة الرملية (تمت إزالة كود الحذف لتبقى موجودة)
         status = await update.message.reply_text("⌛", parse_mode=ParseMode.HTML)
+        temp_file = f"video_{user_id}.mp4"
+        
         ydl_opts = {
-            'quiet': True, 
-            'cookiefile': COOKIES_FILE if os.path.exists(COOKIES_FILE) else None, 
-            'format': 'best[ext=mp4]/best'
+            'quiet': True,
+            'format': 'best',
+            'outtmpl': temp_file,
+            'no_warnings': True,
+            'nocheckcertificate': True, # لتجاوز مشاكل الشهادات
+            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         }
 
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                # استخراج المعلومات وفحص الحجم
-                info = await asyncio.to_thread(ydl.extract_info, text, download=False)
-                size_mb = (info.get('filesize') or info.get('filesize_approx') or 0) / (1024*1024)
+                info = await asyncio.to_thread(ydl.extract_info, text, download=True)
                 
-                if size_mb > 50:
-                    await status.edit_text(f"⚠️ <b>الحجم كبير جداً ({size_mb:.1f}MB)!</b>\nتليجرام يمنع الرفع أكثر من 50MB.", parse_mode=ParseMode.HTML)
-                    return
-                
-                await status.edit_text("⏳")
-                caption = f"✅ <b>تم التحميل بنجاح!</b>\n✨ <b>بواسطة:</b> {BOT_NAME}"
-                
-                # إرسال الفيديو مباشرة
-                await context.bot.send_video(chat_id=user_id, video=info.get('url'), caption=caption, parse_mode=ParseMode.HTML)
-            
-            await status.delete()
-            # رسالة الشكر النهائية
-            await context.bot.send_message(user_id, "✨━━━━━━━━━━━━━✨\n🙏 <b>شكراً لاستخدامك خدمتنا!</b>\n✨━━━━━━━━━━━━━✨", parse_mode=ParseMode.HTML)
-
-        except:
-            await status.edit_text("❌ <b>حدث خطأ! تأكد من أن الرابط عام وصحيح.</b>")
+                if os.path.exists(temp_file):
+                    # إرسال الفيديو
+                    await context.bot.send_video(
+                        chat_id=user_id, 
+                        video=open(temp_file, 'rb'), 
+                        caption=f"✅ <b>تم التحميل بنجاح!</b>\n✨ <b>بواسطة:</b> {BOT_NAME}", 
+                        parse_mode=ParseMode.HTML
+                    )
+                    
+                    # تم إيقاف حذف الساعة (await status.delete()) لتبقى موجودة كما طلبت
+                    
+                    # إضافة رسالة الانتهاء المطلوبة
+                    await context.bot.send_message(
+                        chat_id=user_id, 
+                        text="✨━━━━━━━━━━━━━✨\n🙏 <b>شكراً لاستخدامك خدمتنا!</b>\n✨━━━━━━━━━━━━━✨", 
+                        parse_mode=ParseMode.HTML
+                    )
+                else:
+                    await status.edit_text("❌ لم يتم العثور على الفيديو.")
+        except Exception as e:
+            print(f"Error: {e}")
+            await status.edit_text("❌ فشل التحميل. الرابط قد يكون خاصاً أو تالفاً.")
+        finally:
+            if os.path.exists(temp_file):
+                os.remove(temp_file)
 
 if __name__ == "__main__":
     keep_alive()
-    app = ApplicationBuilder().token(TOKEN).build()
+    app = ApplicationBuilder().token(TOKEN).connect_timeout(30).read_timeout(30).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
     print("🚀 FAST MEDIA IS LIVE AND READY!")
