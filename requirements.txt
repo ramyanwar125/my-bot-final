@@ -3,3 +3,6 @@ yt-dlp
 flask
 waitress
 httpx
+pyrogram
+tgcrypto
+
