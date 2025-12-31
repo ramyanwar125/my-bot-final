@@ -110,8 +110,11 @@ async def progress_bar(current, total, status_msg, start_time):
 @app.on_message(filters.command("start") & filters.private)
 async def start(client, message):
     add_user(message.from_user.id)
-    # الأزرار الأساسية
-    kb = '🔄 Restart Service | بدء الخدمة'], ['👨‍💻 Developer | المطور'
+    # الأزرار الأساسية (تم تصحيح القائمة هنا)
+    kb = [
+        ['🔄 Restart Service | بدء الخدمة'], 
+        ['👨‍💻 Developer | المطور']
+    ]
     # إضافة زر الإذاعة للمطور فقط
     if message.from_user.id == ADMIN_ID:
         kb.append(['📣 Broadcast | إذاعة'])
@@ -186,7 +189,6 @@ async def download_cb(client, callback_query):
             else: 
                 await client.send_video(user_id, file_path, caption=f"🎬 **Video by {BOT_NAME}**", progress=progress_bar, progress_args=(status_msg, st))
             
-            # --- رسالة الشكر الاحترافية مع معرف المطور ---
             thanks_text = (
                 f"✨ **Mission Completed | تمت المهمة** ✨\n"
                 f"━━━━━━━━━━━━━━━━━━\n"
