@@ -1,153 +1,210 @@
-import os
-import asyncio
+import os, asyncio, time, re
+from pyrogram import Client, filters
+from pyrogram.types import ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton
+from pyrogram.errors import UserNotParticipant
 import yt_dlp
-from flask import Flask
-from threading import Thread
-from waitress import serve
-from telegram import Update, ReplyKeyboardMarkup
-from telegram.constants import ParseMode
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
+from http.server import BaseHTTPRequestHandler, HTTPServer
+import threading
 
-# --- 1. سرفر الويب (لضمان بقاء البوت حياً) ---
-app_web = Flask('')
-@app_web.route('/')
-def home(): return "⚡ FAST MEDIA Is Online!"
+# --- سيرفر وهمي لإرضاء ريندر (Port Binding) ---
+def run_health_check_server():
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"Bot is Running")
+    
+    port = int(os.environ.get("PORT", 8080))
+    server = HTTPServer(('0.0.0.0', port), Handler)
+    server.serve_forever()
 
-def run_flask():
-    try: serve(app_web, host='0.0.0.0', port=8080)
-    except: pass
-
-def keep_alive():
-    t = Thread(target=run_flask)
-    t.daemon = True
-    t.start()
-
-# --- 2. الإعدادات الأساسية ---
-TOKEN = "8254937829:AAGgMOc0z68Rqm5MAoURNmZNslH60o2LDJw" 
+# --- Config | الإعدادات ---
+API_ID = 35909466
+API_HASH = "c4f81cfa1dc011bcf66c6a4a58560fd2"
+BOT_TOKEN = "8254937829:AAE2ayqwQJlxix9VC70sWvj2Ss5nSOxgId0"
 ADMIN_ID = 7349033289 
 DEV_USER = "@TOP_1UP"
 BOT_NAME = "『 ＦＡＳＴ ＭＥＤＩＡ 』"
-CHANNELS = ["@T_U_H1", "@T_U_H2", "@Mega0Net", "@Fast_Mediia"]
-USERS_FILE = "users.txt"
-COOKIES_FILE = "cookies.txt" # تأكد من وجود الملف بجانب الكود
+CHANNEL_USER = "Fast_Mediia" 
+USERS_FILE = "users_database.txt" 
 
-# --- 3. وظائف الإدارة والبيانات ---
-def get_users_list():
-    if not os.path.exists(USERS_FILE): return []
-    with open(USERS_FILE, "r") as f: return f.read().splitlines()
+# --- Engine Section | قسم المحرك ---
+def prepare_engine():
+    cookie_file = "cookies_stable.txt"
+    if not os.path.exists(cookie_file):
+        with open(cookie_file, "w") as f:
+            f.write("# Netscape HTTP Cookie File\n")
+            f.write(".youtube.com\tTRUE\t/\tTRUE\t1766757959\tGPS\t1\n")
+    return cookie_file
+
+def get_all_formats(url):
+    ydl_opts = {
+        'quiet': True, 
+        'cookiefile': prepare_engine(), 
+        'nocheckcertificate': True, 
+        'no_warnings': True,
+    }
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(url, download=False)
+        formats_btns = {}
+        all_formats = info.get('formats', [])
+        for f in all_formats:
+            if f.get('vcodec') != 'none' and f.get('acodec') != 'none':
+                res = f.get('height')
+                if res:
+                    label = f"🎬 {res}p"
+                    formats_btns[label] = f.get('format_id')
+        if not formats_btns:
+            formats_btns["🎬 Best Quality | أفضل جودة"] = "best"
+        def extract_res(label):
+            nums = re.findall(r'\d+', label)
+            return int(nums[0]) if nums else 0
+        sorted_labels = sorted(formats_btns.keys(), key=extract_res, reverse=True)
+        final_formats = {label: formats_btns[label] for label in sorted_labels}
+        final_formats["🎶 Audio | تحميل صوت"] = "bestaudio[ext=m4a]/bestaudio"
+        return final_formats
+
+def run_download(url, format_id, file_path):
+    ydl_opts = {
+        'outtmpl': file_path,
+        'format': format_id,
+        'cookiefile': 'cookies_stable.txt',
+        'nocheckcertificate': True,
+        'quiet': True,
+        'continuedl': True,
+    }
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        ydl.download([url])
+
+# --- Bot Section | قسم البوت ---
+app = Client("fast_media_v47", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+user_cache = {}
 
 def add_user(user_id):
-    users = get_users_list()
+    if not os.path.exists(USERS_FILE): open(USERS_FILE, "w").close()
+    users = open(USERS_FILE, "r").read().splitlines()
     if str(user_id) not in users:
         with open(USERS_FILE, "a") as f: f.write(f"{user_id}\n")
 
-async def is_subscribed(context, user_id):
-    if user_id == ADMIN_ID: return True
-    for chan in CHANNELS:
-        try:
-            member = await context.bot.get_chat_member(chat_id=chan, user_id=user_id)
-            if member.status in ['left', 'kicked']: return False
-        except: continue
-    return True
+def get_users_count():
+    if not os.path.exists(USERS_FILE): return 0
+    return len(open(USERS_FILE, "r").read().splitlines())
 
-# --- 4. واجهة الترحيب ---
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    add_user(user.id)
-    kb = [['🔄 بدء من جديد'], ['📢 القنوات']]
-    if user.id == ADMIN_ID: kb.append(['📊 الإحصائيات', '📣 إذاعة'])
-    kb.append(['👨‍💻 المطور'])
-    markup = ReplyKeyboardMarkup(kb, resize_keyboard=True)
+async def progress_bar(current, total, status_msg, start_time):
+    now = time.time()
+    diff = now - start_time
+    if diff < 3.0: return
+    percentage = current * 100 / total
+    speed = current / diff
+    bar = "▬" * int(percentage // 10) + "▭" * (10 - int(percentage // 10))
+    tmp = (
+        f"🚀 **Transferring.. جاري النقل**\n"
+        f"━━━━━━━━━━━━━━━━━━\n\n"
+        f"◈ **Progress:** `{bar}` **{percentage:.1f}%**\n"
+        f"◈ **Speed:** `{speed/(1024*1024):.2f} MB/s` ⚡️\n\n"
+        f"━━━━━━━━━━━━━━━━━━"
+    )
+    try: await status_msg.edit(tmp)
+    except: pass
+
+@app.on_message(filters.command("start") & filters.private)
+async def start(client, message):
+    add_user(message.from_user.id)
+    # الأزرار الأساسية
+    kb = '🔄 Restart Service | بدء الخدمة'], ['👨‍💻 Developer | المطور'
+    # إضافة زر الإذاعة للمطور فقط
+    if message.from_user.id == ADMIN_ID:
+        kb.append(['📣 Broadcast | إذاعة'])
     
     welcome_text = (
         f"✨━━━━━━━━━━━━━✨\n"
-        f"  🙋‍♂️ أهلاً بك يا <b>{user.first_name}</b>\n"
-        f"  🌟 في عالم {BOT_NAME}\n"
+        f"  🙋‍♂️ Welcome | أهلاً بك يا **{message.from_user.first_name}**\n"
+        f"  🌟 In **{BOT_NAME}** World\n"
         f"✨━━━━━━━━━━━━━✨\n\n"
-        f"🚀 أنا بوت سريع جداً لتحميل الفيديوهات\n"
-        f"📱 من المنصات التالية بأعلى جودة:\n\n"
-        f"📸 Instagram | 🎵 TikTok\n"
-        f"👻 Snapchat  | 🔵 Facebook\n\n"
-        f"👇 فقط أرسل الرابط واترك الباقي عليّ!"
+        f"🚀 **Fast Downloader for | بوت تحميل سريع:**\n"
+        f"📹 YouTube | 📸 Instagram | 🎵 TikTok\n"
+        f"👻 Snapchat | 🔵 Facebook\n\n"
+        f"👇 **Send link now! | أرسل الرابط الآن!**"
     )
-    await update.message.reply_text(welcome_text, reply_markup=markup, parse_mode=ParseMode.HTML)
+    await message.reply(welcome_text, reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True))
 
-# --- 5. معالج الرسائل والتحميل ---
-async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text
-    user_id = update.effective_user.id
+@app.on_message(filters.text & filters.private)
+async def handle_text(client, message):
+    text, user_id = message.text, message.from_user.id
+    
+    if text == '🔄 Restart Service | بدء الخدمة':
+        await message.reply("📡 **System Ready.. النظام جاهز!** ⚡️")
+        return
+    
+    if text == '👨‍💻 Developer | المطور':
+        msg = f"👑 **Main Developer:** {DEV_USER}\n📢 **Our Channel:** @{CHANNEL_USER}\n"
+        if user_id == ADMIN_ID:
+            msg += f"📊 **Total Users:** `{get_users_count()}`"
+        await message.reply(msg)
+        return
 
-    if text == '🔄 بدء من جديد': await start(update, context); return
-    elif text == '👨‍💻 المطور': await update.message.reply_text(f"👑 <b>المطور المسؤول:</b> {DEV_USER}", parse_mode=ParseMode.HTML); return
-    elif text == '📢 القنوات':
-        links = "\n".join([f"🔗 {c}" for c in CHANNELS])
-        await update.message.reply_text(f"📢 <b>قنوات الاشتراك الإجباري:</b>\n\n{links}", parse_mode=ParseMode.HTML); return
+    if text == '📣 Broadcast | إذاعة' and user_id == ADMIN_ID:
+        await message.reply("📥 **Send your message | أرسل رسالة الإذاعة:**")
+        user_cache[f"bc_{user_id}"] = True
+        return
 
-    # أزرار الإدارة
-    if user_id == ADMIN_ID:
-        if text == '📊 الإحصائيات':
-            count = len(get_users_list())
-            await update.message.reply_text(f"📊 <b>عدد المشتركين:</b> {count}"); return
-        elif text == '📣 إذاعة':
-            await update.message.reply_text("📥 أرسل الرسالة للإذاعة:"); context.user_data['broadcast'] = True; return
-        elif context.user_data.get('broadcast'):
-            for uid in get_users_list():
-                try: await context.bot.copy_message(chat_id=uid, from_chat_id=user_id, message_id=update.message.message_id)
-                except: pass
-            await update.message.reply_text("✅ تمت الإذاعة بنجاح!"); context.user_data['broadcast'] = False; return
+    if user_cache.get(f"bc_{user_id}"):
+        users = open(USERS_FILE).read().splitlines()
+        for u in users:
+            try: await message.copy(int(u))
+            except: pass
+        await message.reply("✅ **Broadcast Sent | تمت الإذاعة**")
+        user_cache[f"bc_{user_id}"] = False
+        return
 
-    # التحميل عند استلام رابط
     if "http" in text:
-        if not await is_subscribed(context, user_id):
-            await update.message.reply_text("⚠️ <b>يجب الاشتراك في القنوات أولاً!</b>", parse_mode=ParseMode.HTML); return
-
-        status = await update.message.reply_text("⌛", parse_mode=ParseMode.HTML)
-        temp_file = f"video_{user_id}.mp4"
-        
-        ydl_opts = {
-            'quiet': True,
-            'format': 'best',
-            'outtmpl': temp_file,
-            'no_warnings': True,
-            'nocheckcertificate': True,
-            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        }
-
-        # تفعيل الكوكيز إذا كان الملف موجوداً
-        if os.path.exists(COOKIES_FILE):
-            ydl_opts['cookiefile'] = COOKIES_FILE
-
+        status = await message.reply("🔍 **Analyzing.. جاري المعالجة** ⏳")
         try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                await asyncio.to_thread(ydl.download, [text])
-                
-                if os.path.exists(temp_file):
-                    # إرسال الفيديو
-                    await context.bot.send_video(
-                        chat_id=user_id, 
-                        video=open(temp_file, 'rb'), 
-                        caption=f"✅ <b>تم التحميل بنجاح!</b>\n✨ <b>بواسطة:</b> {BOT_NAME}", 
-                        parse_mode=ParseMode.HTML
-                    )
-                    
-                    # إرسال رسالة الشكر (بدون حذف الساعة الرملية)
-                    await context.bot.send_message(
-                        chat_id=user_id, 
-                        text="✨━━━━━━━━━━━━━✨\n🙏 <b>شكراً لاستخدامك خدمتنا!</b>\n✨━━━━━━━━━━━━━✨", 
-                        parse_mode=ParseMode.HTML
-                    )
-                else:
-                    await status.edit_text("❌ لم يتم العثور على الفيديو.")
-        except Exception as e:
-            print(f"Error: {e}")
-            await status.edit_text("❌ فشل التحميل. تأكد من الرابط أو الكوكيز.")
-        finally:
-            if os.path.exists(temp_file): os.remove(temp_file)
+            formats = await asyncio.to_thread(get_all_formats, text)
+            user_cache[user_id] = text
+            btns = [[InlineKeyboardButton(res, callback_data=fid)] for res, fid in formats.items()]
+            await status.edit("✅ **Formats Found | تم الاستخراج**\nChoose your option: 👇", reply_markup=InlineKeyboardMarkup(btns))
+        except: await status.edit("❌ **Error | فشل المعالجة**")
+
+@app.on_callback_query()
+async def download_cb(client, callback_query):
+    f_id, user_id = callback_query.data, callback_query.from_user.id
+    url = user_cache.get(user_id)
+    if not url:
+        await callback_query.answer("⚠️ Session Expired", show_alert=True); return
+    
+    status_msg = await callback_query.message.edit("⚙️ **Processing.. جاري التنفيذ**")
+    is_audio = "audio" in f_id
+    file_path = f"media_{user_id}.{'m4a' if is_audio else 'mp4'}"
+    
+    try:
+        await asyncio.to_thread(run_download, url, f_id, file_path)
+        if os.path.exists(file_path):
+            st = time.time()
+            if is_audio: 
+                await client.send_audio(user_id, file_path, caption=f"🎵 **Audio by {BOT_NAME}**", progress=progress_bar, progress_args=(status_msg, st))
+            else: 
+                await client.send_video(user_id, file_path, caption=f"🎬 **Video by {BOT_NAME}**", progress=progress_bar, progress_args=(status_msg, st))
+            
+            # --- رسالة الشكر الاحترافية مع معرف المطور ---
+            thanks_text = (
+                f"✨ **Mission Completed | تمت المهمة** ✨\n"
+                f"━━━━━━━━━━━━━━━━━━\n"
+                f"🤖 **Bot:** {BOT_NAME}\n"
+                f"👨‍💻 **Dev:** {DEV_USER}\n\n"
+                f"🌟 **شكراً لاستخدامك خدمتنا!**\n"
+                f"📢 **Channel:** @{CHANNEL_USER}\n"
+                f"━━━━━━━━━━━━━━━━━━\n"
+                f"🚀 *Fast • Simple • High Quality*"
+            )
+            await client.send_message(user_id, thanks_text)
+            await status_msg.delete()
+    except Exception as e: 
+        await status_msg.edit(f"❌ **Failed:** {e}")
+    finally: 
+        if os.path.exists(file_path): os.remove(file_path)
 
 if __name__ == "__main__":
-    keep_alive()
-    app = ApplicationBuilder().token(TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
-    print("🚀 FAST MEDIA IS LIVE AND READY!")
-    app.run_polling(drop_pending_updates=True)
+    # تشغيل السيرفر الوهمي في الخلفية لإرضاء ريندر
+    threading.Thread(target=run_health_check_server, daemon=True).start()
+    app.run()
