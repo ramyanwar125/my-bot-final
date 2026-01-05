@@ -1,10 +1,9 @@
-import os, asyncio, time, re
+import os, asyncio, time, re, threading
 from pyrogram import Client, filters
 from pyrogram.types import ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton
 from pyrogram.errors import UserNotParticipant
 import yt_dlp
 from http.server import BaseHTTPRequestHandler, HTTPServer
-import threading
 
 # --- سيرفر وهمي لإرضاء ريندر (Port Binding) ---
 def run_health_check_server():
@@ -19,9 +18,9 @@ def run_health_check_server():
     server.serve_forever()
 
 # --- Config | الإعدادات ---
-API_ID = 35909466
+API_ID = 33536164
 API_HASH = "c4f81cfa1dc011bcf66c6a4a58560fd2"
-BOT_TOKEN = "8254937829:AAE2ayqwQJlxix9VC70sWvj2Ss5nSOxgId0"
+BOT_TOKEN = "8304738811:AAGFPcqviQvM4ye7mC7Oeostvo-nsKoJRyE"
 ADMIN_ID = 7349033289 
 DEV_USER = "@TOP_1UP"
 BOT_NAME = "『 ＦＡＳＴ ＭＥＤＩＡ 』"
@@ -77,7 +76,7 @@ def run_download(url, format_id, file_path):
         ydl.download([url])
 
 # --- Bot Section | قسم البوت ---
-app = Client("fast_media_v47", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+app = Client("fast_media_v0019", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 user_cache = {}
 
 def add_user(user_id):
@@ -89,6 +88,15 @@ def add_user(user_id):
 def get_users_count():
     if not os.path.exists(USERS_FILE): return 0
     return len(open(USERS_FILE, "r").read().splitlines())
+
+async def check_sub(client, user_id):
+    try:
+        await client.get_chat_member(CHANNEL_USER, user_id)
+        return True
+    except UserNotParticipant:
+        return False
+    except:
+        return True
 
 async def progress_bar(current, total, status_msg, start_time):
     now = time.time()
@@ -110,12 +118,10 @@ async def progress_bar(current, total, status_msg, start_time):
 @app.on_message(filters.command("start") & filters.private)
 async def start(client, message):
     add_user(message.from_user.id)
-    # الأزرار الأساسية (تم تصحيح القائمة هنا)
     kb = [
         ['🔄 Restart Service | بدء الخدمة'], 
         ['👨‍💻 Developer | المطور']
     ]
-    # إضافة زر الإذاعة للمطور فقط
     if message.from_user.id == ADMIN_ID:
         kb.append(['📣 Broadcast | إذاعة'])
     
@@ -152,6 +158,7 @@ async def handle_text(client, message):
         return
 
     if user_cache.get(f"bc_{user_id}"):
+        if not os.path.exists(USERS_FILE): return
         users = open(USERS_FILE).read().splitlines()
         for u in users:
             try: await message.copy(int(u))
@@ -161,13 +168,20 @@ async def handle_text(client, message):
         return
 
     if "http" in text:
+        # فحص الاشتراك الإجباري
+        if not await check_sub(client, user_id):
+            btn = InlineKeyboardMarkup([[InlineKeyboardButton("اضغط هنا للاشتراك ✅", url=f"https://t.me/{CHANNEL_USER}")]])
+            await message.reply(f"⚠️ **يجب عليك الاشتراك في قناة البوت أولاً لاستخدام الخدمة!**\n\nبعد الاشتراك، أرسل الرابط مرة أخرى.", reply_markup=btn)
+            return
+
         status = await message.reply("🔍 **Analyzing.. جاري المعالجة** ⏳")
         try:
             formats = await asyncio.to_thread(get_all_formats, text)
             user_cache[user_id] = text
             btns = [[InlineKeyboardButton(res, callback_data=fid)] for res, fid in formats.items()]
             await status.edit("✅ **Formats Found | تم الاستخراج**\nChoose your option: 👇", reply_markup=InlineKeyboardMarkup(btns))
-        except: await status.edit("❌ **Error | فشل المعالجة**")
+        except: 
+            await status.edit("❌ **Error | فشل المعالجة**")
 
 @app.on_callback_query()
 async def download_cb(client, callback_query):
@@ -176,7 +190,12 @@ async def download_cb(client, callback_query):
     if not url:
         await callback_query.answer("⚠️ Session Expired", show_alert=True); return
     
-    status_msg = await callback_query.message.edit("⚙️ **Processing.. جاري التنفيذ**")
+    # مسح الرسالة القديمة لمنع تكرار الضغط
+    try:
+        status_msg = await callback_query.message.edit("⚙️ **Processing.. جاري التنفيذ**")
+    except:
+        return
+
     is_audio = "audio" in f_id
     file_path = f"media_{user_id}.{'m4a' if is_audio else 'mp4'}"
     
@@ -207,6 +226,5 @@ async def download_cb(client, callback_query):
         if os.path.exists(file_path): os.remove(file_path)
 
 if __name__ == "__main__":
-    # تشغيل السيرفر الوهمي في الخلفية لإرضاء ريندر
     threading.Thread(target=run_health_check_server, daemon=True).start()
     app.run()
