@@ -27,7 +27,7 @@ BOT_NAME = "『 ＦＡＳＴ ＭＥＤＩＡ 』"
 CHANNEL_USER = "Fast_Mediia" 
 USERS_FILE = "users_database.txt" 
 
-# --- Engine Section | قسم المحرك ---
+# --- Engine Section ---
 def prepare_engine():
     cookie_file = "cookies_stable.txt"
     if not os.path.exists(cookie_file):
@@ -75,8 +75,8 @@ def run_download(url, format_id, file_path):
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         ydl.download([url])
 
-# --- Bot Section | قسم البوت ---
-app = Client("fast_media_v0019", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+# --- Bot Section ---
+app = Client("fast_media_v19", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 user_cache = {}
 
 def add_user(user_id):
@@ -125,13 +125,14 @@ async def start(client, message):
     if message.from_user.id == ADMIN_ID:
         kb.append(['📣 Broadcast | إذاعة'])
     
+    # تم حذف YouTube من الرسالة
     welcome_text = (
         f"✨━━━━━━━━━━━━━✨\n"
         f"  🙋‍♂️ Welcome | أهلاً بك يا **{message.from_user.first_name}**\n"
         f"  🌟 In **{BOT_NAME}** World\n"
         f"✨━━━━━━━━━━━━━✨\n\n"
         f"🚀 **Fast Downloader for | بوت تحميل سريع:**\n"
-        f"📹 YouTube | 📸 Instagram | 🎵 TikTok\n"
+        f"📸 Instagram | 🎵 TikTok\n"
         f"👻 Snapchat | 🔵 Facebook\n\n"
         f"👇 **Send link now! | أرسل الرابط الآن!**"
     )
@@ -168,6 +169,11 @@ async def handle_text(client, message):
         return
 
     if "http" in text:
+        # فحص إذا كان الرابط يوتيوب لمنعه
+        if "youtube.com" in text.lower() or "youtu.be" in text.lower():
+            await message.reply("❌ **عذراً، تحميل اليوتيوب غير مدعوم حالياً في هذا البوت.**")
+            return
+
         # فحص الاشتراك الإجباري
         if not await check_sub(client, user_id):
             btn = InlineKeyboardMarkup([[InlineKeyboardButton("اضغط هنا للاشتراك ✅", url=f"https://t.me/{CHANNEL_USER}")]])
@@ -181,7 +187,7 @@ async def handle_text(client, message):
             btns = [[InlineKeyboardButton(res, callback_data=fid)] for res, fid in formats.items()]
             await status.edit("✅ **Formats Found | تم الاستخراج**\nChoose your option: 👇", reply_markup=InlineKeyboardMarkup(btns))
         except: 
-            await status.edit("❌ **Error | فشل المعالجة**")
+            await status.edit("❌ **Error | فشل المعالجة**\nتأكد من صحة الرابط أو المحاولة لاحقاً.")
 
 @app.on_callback_query()
 async def download_cb(client, callback_query):
@@ -190,7 +196,6 @@ async def download_cb(client, callback_query):
     if not url:
         await callback_query.answer("⚠️ Session Expired", show_alert=True); return
     
-    # مسح الرسالة القديمة لمنع تكرار الضغط
     try:
         status_msg = await callback_query.message.edit("⚙️ **Processing.. جاري التنفيذ**")
     except:
