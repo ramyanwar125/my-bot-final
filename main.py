@@ -20,7 +20,7 @@ def run_health_check_server():
 # --- Config | الإعدادات ---
 API_ID = 33536164
 API_HASH = "c4f81cfa1dc011bcf66c6a4a58560fd2"
-BOT_TOKEN = "8304738811:AAGFPcqviQvM4ye7mC7Oeostvo-nsKoJRyE"
+BOT_TOKEN = "8416461275:AAFKKWIzdVKnccjtCWkfxl7KrdCQ8gB3F4Q"
 ADMIN_ID = 7349033289 
 DEV_USER = "@TOP_1UP"
 BOT_NAME = "『 ＦＡＳＴ ＭＥＤＩＡ 』"
